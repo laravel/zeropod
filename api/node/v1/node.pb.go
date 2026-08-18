@@ -689,9 +689,10 @@ const file_node_proto_rawDesc = "" +
 	"\x17checkpoint_memory_bytes\x18\x03 \x01(\x04R\x15checkpointMemoryBytes\"X\n" +
 	"\x17RestoreCapacityResponse\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12#\n" +
-	"\rredirect_addr\x18\x02 \x01(\tR\fredirectAddr2\xbc\x04\n" +
+	"\rredirect_addr\x18\x02 \x01(\tR\fredirectAddr2\x86\x05\n" +
 	"\x04Node\x12C\n" +
-	"\x04Evac\x12\x1c.zeropod.node.v1.EvacRequest\x1a\x1d.zeropod.node.v1.EvacResponse\x12J\n" +
+	"\x04Evac\x12\x1c.zeropod.node.v1.EvacRequest\x1a\x1d.zeropod.node.v1.EvacResponse\x12H\n" +
+	"\tAbortEvac\x12\x1c.zeropod.node.v1.EvacRequest\x1a\x1d.zeropod.node.v1.EvacResponse\x12J\n" +
 	"\vPrepareEvac\x12\x1c.zeropod.node.v1.EvacRequest\x1a\x1d.zeropod.node.v1.EvacResponse\x12L\n" +
 	"\aRestore\x12\x1f.zeropod.node.v1.RestoreRequest\x1a .zeropod.node.v1.RestoreResponse\x12R\n" +
 	"\rFinishRestore\x12\x1f.zeropod.node.v1.RestoreRequest\x1a .zeropod.node.v1.RestoreResponse\x12Q\n" +
@@ -739,21 +740,23 @@ var file_node_proto_depIdxs = []int32{
 	12, // 8: zeropod.node.v1.MigrationInfo.restore_end:type_name -> google.protobuf.Timestamp
 	4,  // 9: zeropod.node.v1.RestoreCapacityRequest.pod_info:type_name -> zeropod.node.v1.PodInfo
 	0,  // 10: zeropod.node.v1.Node.Evac:input_type -> zeropod.node.v1.EvacRequest
-	0,  // 11: zeropod.node.v1.Node.PrepareEvac:input_type -> zeropod.node.v1.EvacRequest
-	2,  // 12: zeropod.node.v1.Node.Restore:input_type -> zeropod.node.v1.RestoreRequest
-	2,  // 13: zeropod.node.v1.Node.FinishRestore:input_type -> zeropod.node.v1.RestoreRequest
-	7,  // 14: zeropod.node.v1.Node.NewCriuLazyPages:input_type -> zeropod.node.v1.CriuLazyPagesRequest
-	8,  // 15: zeropod.node.v1.Node.PullImage:input_type -> zeropod.node.v1.PullImageRequest
-	9,  // 16: zeropod.node.v1.Node.RestoreCapacity:input_type -> zeropod.node.v1.RestoreCapacityRequest
-	1,  // 17: zeropod.node.v1.Node.Evac:output_type -> zeropod.node.v1.EvacResponse
-	1,  // 18: zeropod.node.v1.Node.PrepareEvac:output_type -> zeropod.node.v1.EvacResponse
-	3,  // 19: zeropod.node.v1.Node.Restore:output_type -> zeropod.node.v1.RestoreResponse
-	3,  // 20: zeropod.node.v1.Node.FinishRestore:output_type -> zeropod.node.v1.RestoreResponse
-	11, // 21: zeropod.node.v1.Node.NewCriuLazyPages:output_type -> google.protobuf.Empty
-	6,  // 22: zeropod.node.v1.Node.PullImage:output_type -> zeropod.node.v1.Image
-	10, // 23: zeropod.node.v1.Node.RestoreCapacity:output_type -> zeropod.node.v1.RestoreCapacityResponse
-	17, // [17:24] is the sub-list for method output_type
-	10, // [10:17] is the sub-list for method input_type
+	0,  // 11: zeropod.node.v1.Node.AbortEvac:input_type -> zeropod.node.v1.EvacRequest
+	0,  // 12: zeropod.node.v1.Node.PrepareEvac:input_type -> zeropod.node.v1.EvacRequest
+	2,  // 13: zeropod.node.v1.Node.Restore:input_type -> zeropod.node.v1.RestoreRequest
+	2,  // 14: zeropod.node.v1.Node.FinishRestore:input_type -> zeropod.node.v1.RestoreRequest
+	7,  // 15: zeropod.node.v1.Node.NewCriuLazyPages:input_type -> zeropod.node.v1.CriuLazyPagesRequest
+	8,  // 16: zeropod.node.v1.Node.PullImage:input_type -> zeropod.node.v1.PullImageRequest
+	9,  // 17: zeropod.node.v1.Node.RestoreCapacity:input_type -> zeropod.node.v1.RestoreCapacityRequest
+	1,  // 18: zeropod.node.v1.Node.Evac:output_type -> zeropod.node.v1.EvacResponse
+	1,  // 19: zeropod.node.v1.Node.AbortEvac:output_type -> zeropod.node.v1.EvacResponse
+	1,  // 20: zeropod.node.v1.Node.PrepareEvac:output_type -> zeropod.node.v1.EvacResponse
+	3,  // 21: zeropod.node.v1.Node.Restore:output_type -> zeropod.node.v1.RestoreResponse
+	3,  // 22: zeropod.node.v1.Node.FinishRestore:output_type -> zeropod.node.v1.RestoreResponse
+	11, // 23: zeropod.node.v1.Node.NewCriuLazyPages:output_type -> google.protobuf.Empty
+	6,  // 24: zeropod.node.v1.Node.PullImage:output_type -> zeropod.node.v1.Image
+	10, // 25: zeropod.node.v1.Node.RestoreCapacity:output_type -> zeropod.node.v1.RestoreCapacityResponse
+	18, // [18:26] is the sub-list for method output_type
+	10, // [10:18] is the sub-list for method input_type
 	10, // [10:10] is the sub-list for extension type_name
 	10, // [10:10] is the sub-list for extension extendee
 	0,  // [0:10] is the sub-list for field type_name

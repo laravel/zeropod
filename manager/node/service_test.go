@@ -1,8 +1,10 @@
 package node
 
 import (
+	"context"
 	"log/slog"
 	"testing"
+	"time"
 
 	nodev1 "github.com/laravel/zeropod/api/node/v1"
 	v1 "github.com/laravel/zeropod/api/runtime/v1"
@@ -10,6 +12,7 @@ import (
 	"github.com/laravel/zeropod/manager/capacity"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -209,6 +212,172 @@ func TestRestoreCapacity(t *testing.T) {
 	}
 }
 
+func TestRestore(t *testing.T) {
+	const (
+		migrationName   = "foo"
+		podTemplateHash = "hashi"
+		containerName   = "app1"
+		containerID     = "container-id"
+	)
+
+	for name, tc := range map[string]struct {
+		migration       *v1.Migration
+		containerName   string
+		abortMigration  bool
+		expectedErr     string
+		expectedFailed  bool
+		expectedImageID string
+	}{
+		"no matching migration": {
+			migration:     newRestoreMigration(migrationName, "other-hash", containerName, containerID, nil),
+			containerName: containerName,
+			expectedErr:   "timeout waiting for matching migration",
+		},
+		"migration already failed": {
+			migration: withFailedContainer(
+				newRestoreMigration(migrationName, podTemplateHash, containerName, containerID, nil), containerName,
+			),
+			containerName: containerName,
+			expectedErr:   "matching migration is set to failed",
+		},
+		"migration servers never set": {
+			migration:      newRestoreMigration(migrationName, podTemplateHash, containerName, containerID, nil),
+			containerName:  containerName,
+			expectedErr:    "migration servers are not set on migration",
+			expectedFailed: true,
+		},
+		"migration aborted while waiting for servers": {
+			migration:      newRestoreMigration(migrationName, podTemplateHash, containerName, containerID, nil),
+			containerName:  containerName,
+			abortMigration: true,
+			expectedErr:    "matching migration is set to failed",
+			expectedFailed: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			assert.NoError(t, corev1.AddToScheme(scheme))
+			assert.NoError(t, v1.AddToScheme(scheme))
+
+			pod := newPod(tc.containerName, nil)
+			pod.Labels = map[string]string{appsv1.DefaultDeploymentUniqueLabelKey: podTemplateHash}
+
+			kube := fake.NewClientBuilder().WithScheme(scheme).
+				WithStatusSubresource(&v1.Migration{}).
+				WithObjects(pod, tc.migration).Build()
+
+			slog.SetLogLoggerLevel(slog.LevelDebug)
+			ns := &nodeService{
+				kube:     kube,
+				nodeName: "node1",
+				host:     "10.0.0.1",
+				log:      slog.Default(),
+				timeouts: Timeouts{MigrationServers: 200 * time.Millisecond},
+			}
+
+			req := &nodev1.RestoreRequest{
+				PodInfo: &nodev1.PodInfo{
+					Name:          pod.Name,
+					Namespace:     pod.Namespace,
+					ContainerName: tc.containerName,
+					Ip:            "10.0.0.2",
+				},
+				MigrationInfo: &nodev1.MigrationInfo{ImageId: "image-id"},
+			}
+
+			if tc.abortMigration {
+				abortErr := make(chan error, 1)
+				go func() {
+					abortErr <- pollUntilContextCancel(t.Context(), func(ctx context.Context) (bool, error) {
+						migration := &v1.Migration{}
+						if err := kube.Get(ctx, client.ObjectKeyFromObject(tc.migration), migration); err != nil {
+							return false, err
+						}
+						if !migration.Spec.RestoreReady {
+							return false, nil
+						}
+						_, err := ns.AbortEvac(ctx, &nodev1.EvacRequest{PodInfo: req.PodInfo})
+						return true, err
+					})
+				}()
+				t.Cleanup(func() { assert.NoError(t, <-abortErr) })
+			}
+
+			resp, err := ns.Restore(t.Context(), req)
+			if tc.expectedErr != "" {
+				assert.ErrorContains(t, err, tc.expectedErr)
+				assert.Nil(t, resp)
+			} else {
+				assert.NoError(t, err)
+				assert.NotNil(t, resp)
+				assert.Equal(t, tc.expectedImageID, resp.MigrationInfo.ImageId)
+			}
+
+			if tc.expectedFailed {
+				migration := &v1.Migration{}
+				assert.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(tc.migration), migration))
+				assert.True(t, migrationFailed(migration, tc.containerName))
+			}
+		})
+	}
+}
+
+func TestAbortEvac(t *testing.T) {
+	for name, tc := range map[string]struct {
+		migration     *v1.Migration
+		containerName string
+		expectedErr   bool
+	}{
+		"sets container to failed": {
+			migration:     newRestoreMigration("foo", "hashi", "app1", "container-id", nil),
+			containerName: "app1",
+		},
+		"unknown container is added as failed": {
+			migration:     newRestoreMigration("foo", "hashi", "app1", "container-id", nil),
+			containerName: "app2",
+		},
+		"migration not found": {
+			containerName: "app1",
+			expectedErr:   true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			scheme := runtime.NewScheme()
+			assert.NoError(t, corev1.AddToScheme(scheme))
+			assert.NoError(t, v1.AddToScheme(scheme))
+
+			objs := []client.Object{}
+			if tc.migration != nil {
+				objs = append(objs, tc.migration)
+			}
+			kube := fake.NewClientBuilder().WithScheme(scheme).
+				WithStatusSubresource(&v1.Migration{}).
+				WithObjects(objs...).Build()
+
+			slog.SetLogLoggerLevel(slog.LevelDebug)
+			ns := &nodeService{kube: kube, nodeName: "node1", log: slog.Default()}
+
+			resp, err := ns.AbortEvac(t.Context(), &nodev1.EvacRequest{
+				PodInfo: &nodev1.PodInfo{
+					Name:          "foo",
+					Namespace:     "default",
+					ContainerName: tc.containerName,
+				},
+			})
+			assert.NotNil(t, resp)
+			if tc.expectedErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+
+			migration := &v1.Migration{}
+			assert.NoError(t, kube.Get(t.Context(), client.ObjectKeyFromObject(tc.migration), migration))
+			assert.True(t, migrationFailed(migration, tc.containerName))
+		})
+	}
+}
+
 func newPod(containerName string, requests corev1.ResourceList) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "foo", Namespace: "default"},
@@ -250,4 +419,27 @@ func newMigration(targetPodIP string) *v1.Migration {
 			TargetPodIP: targetPodIP,
 		},
 	}
+}
+
+func newRestoreMigration(name, podTemplateHash, containerName, containerID string, imageServer *v1.MigrationServer) *v1.Migration {
+	return &v1.Migration{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: v1.MigrationSpec{
+			SourceNode:      "node2",
+			SourcePod:       name,
+			PodTemplateHash: podTemplateHash,
+			Containers: []v1.MigrationContainer{{
+				Name:        containerName,
+				ID:          containerID,
+				ImageServer: imageServer,
+			}},
+		},
+	}
+}
+
+func withFailedContainer(migration *v1.Migration, containerName string) *v1.Migration {
+	setOrUpdateContainerStatus(migration, containerName, func(status *v1.MigrationContainerStatus) {
+		status.Condition.Phase = v1.MigrationPhaseFailed
+	})
+	return migration
 }

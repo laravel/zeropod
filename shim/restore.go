@@ -47,6 +47,12 @@ var (
 func (c *Container) Restore(ctx context.Context) (*runc.Container, process.Process, error) {
 	c.CheckpointRestore.Lock()
 	defer c.CheckpointRestore.Unlock()
+
+	if c.EvacDrainStarted() {
+		log.G(ctx).Info("evac drain started, not proceeding with restore")
+		return c.Container, c.Process(), nil
+	}
+
 	if !c.ScaledDown() {
 		return nil, nil, ErrAlreadyRestored
 	}

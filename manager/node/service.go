@@ -400,13 +400,7 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 		return nil, fmt.Errorf("timeout waiting for matching migration: %w", err)
 	}
 	log.Info("found matching migration", "name", migration.Name)
-	if slices.ContainsFunc(
-		migration.Status.Containers,
-		func(container v1.MigrationContainerStatus) bool {
-			return container.Name == req.PodInfo.ContainerName &&
-				container.Condition.Phase == v1.MigrationPhaseFailed
-		},
-	) {
+	if migrationFailed(migration, req.PodInfo.ContainerName) {
 		log.Warn("matching migration is set to failed, aborting restore")
 		return nil, fmt.Errorf("matching migration is set to failed")
 	}
@@ -429,6 +423,10 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 		if err := ns.kube.Get(ctx, client.ObjectKeyFromObject(migration), migration); err != nil {
 			return false, err
 		}
+		if migrationFailed(migration, req.PodInfo.ContainerName) {
+			return true, nil
+		}
+
 		for _, ctr := range migration.Spec.Containers {
 			if ctr.Name == req.PodInfo.ContainerName {
 				if (migration.Spec.LiveMigration && ctr.PageServer != nil && ctr.ImageServer != nil) ||
@@ -440,9 +438,14 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 		}
 		return false, nil
 	}); err != nil {
-		ns.setMigrationFailed(ctx, req.PodInfo.ContainerName, migration)
+		_ = ns.setMigrationFailed(ctx, req.PodInfo.ContainerName, migration)
 		log.Error("migration servers unset", "container_name", req.PodInfo.ContainerName)
 		return nil, fmt.Errorf("migration servers are not set on migration: %s", migration.Name)
+	}
+
+	if migrationFailed(migration, req.PodInfo.ContainerName) {
+		log.Warn("matching migration is set to failed, aborting restore")
+		return nil, fmt.Errorf("matching migration is set to failed")
 	}
 
 	log.Info("done waiting for migration servers", "container_name", req.PodInfo.ContainerName)
@@ -467,7 +470,7 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 	}
 	if migration.Spec.LiveMigration {
 		if !ns.liveMigrationSupported {
-			ns.setMigrationFailed(ctx, req.PodInfo.ContainerName, migration)
+			_ = ns.setMigrationFailed(ctx, req.PodInfo.ContainerName, migration)
 			log.Error(ErrLiveMigrationNotSupported.Error())
 			return nil, ErrLiveMigrationNotSupported
 		}
@@ -493,7 +496,7 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 	}, nil
 }
 
-func (ns *nodeService) setMigrationFailed(ctx context.Context, containerName string, migration *v1.Migration) {
+func (ns *nodeService) setMigrationFailed(ctx context.Context, containerName string, migration *v1.Migration) error {
 	if err := ns.updateMigrationStatus(ctx, client.ObjectKeyFromObject(migration), func(m *v1.Migration) (bool, error) {
 		setOrUpdateContainerStatus(m, containerName, func(status *v1.MigrationContainerStatus) {
 			status.Condition.Phase = v1.MigrationPhaseFailed
@@ -501,7 +504,9 @@ func (ns *nodeService) setMigrationFailed(ctx context.Context, containerName str
 		return true, nil
 	}); err != nil {
 		ns.log.Error("failed to update migration status", "container_name", containerName)
+		return err
 	}
+	return nil
 }
 
 func (ns *nodeService) FinishRestore(ctx context.Context, req *nodev1.RestoreRequest) (*nodev1.RestoreResponse, error) {
@@ -860,6 +865,24 @@ func (ns *nodeService) Evac(ctx context.Context, req *nodev1.EvacRequest) (*node
 	return &nodev1.EvacResponse{}, nil
 }
 
+// AbortEvac aborts a migration of a specific container by setting it as failed.
+func (ns *nodeService) AbortEvac(ctx context.Context, req *nodev1.EvacRequest) (*nodev1.EvacResponse, error) {
+	migration := &v1.Migration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      req.PodInfo.Name,
+			Namespace: req.PodInfo.Namespace,
+		},
+	}
+	log := ns.log.With("pod_name", req.PodInfo.Name,
+		"namespace", req.PodInfo.Namespace,
+		"container_name", req.PodInfo.ContainerName)
+	log.Info("got evac abort, updating migration to failed")
+	if err := ns.kube.Get(ctx, client.ObjectKeyFromObject(migration), migration); err != nil {
+		return &nodev1.EvacResponse{}, err
+	}
+	return &nodev1.EvacResponse{}, ns.setMigrationFailed(ctx, req.PodInfo.ContainerName, migration)
+}
+
 func (ns *nodeService) NewCriuLazyPages(ctx context.Context, r *nodev1.CriuLazyPagesRequest) (*emptypb.Empty, error) {
 	// the criu lazy-pages daemon would be able to connect directly to the page
 	// server via TLS but in testing this has been proven to work very
@@ -1070,4 +1093,14 @@ func setOrUpdateContainerStatus(migration *v1.Migration, containerName string, u
 // on certain events and calls the condition immediately.
 func pollUntilContextCancel(ctx context.Context, condition wait.ConditionWithContextFunc) error {
 	return wait.PollUntilContextCancel(ctx, time.Millisecond*10, true, condition)
+}
+
+func migrationFailed(migration *v1.Migration, containerName string) bool {
+	return slices.ContainsFunc(
+		migration.Status.Containers,
+		func(container v1.MigrationContainerStatus) bool {
+			return container.Name == containerName &&
+				container.Condition.Phase == v1.MigrationPhaseFailed
+		},
+	)
 }
