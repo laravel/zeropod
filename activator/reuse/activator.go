@@ -372,6 +372,10 @@ func (act *Activator) Reload(opts ...Option) error {
 	return nil
 }
 
+func (act *Activator) SetConnectTimeout(d time.Duration) {
+	act.connectTimeout = d
+}
+
 func (act *Activator) clearIgnoredAddrs() error {
 	var key trackerIpKey
 	var val byte

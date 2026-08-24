@@ -41,6 +41,7 @@ var (
 	versionFlag            = flag.Bool("version", false, "output version and exit")
 	trackerIgnoreLocalhost = flag.Bool("tracker-ignore-localhost", v1.DefaultTrackerIgnoreLocalhost, "set to ignore traffic from localhost in socket tracker")
 	capacityRequest        = flag.Bool("capacity-request", v1.DefaultCapacityRequest, "enable shim to make a capacity request before restoring")
+	forwardConnectTimeout  = flag.Duration("forward-connect-timeout", time.Duration(v1.DefaultForwardConnectTimeout), "configures the connect timeout used for forwarding")
 	reuseportActivator     = flag.Bool("reuseport-activator", v1.DefaultReuseportActivator, "enable the new reuseport activator")
 	crTimeout              = flag.Duration("cr-timeout", time.Duration(v1.DefaultCheckpointRestoreTimeout), "configures the checkpoint/restore timeout")
 	//lint:ignore U1000 kept for compatibility
@@ -261,6 +262,7 @@ func installRuntime(ctx context.Context, runtime containerRuntime) error {
 	cfg.CapacityRequest = *capacityRequest
 	cfg.ReuseportActivator = *reuseportActivator
 	cfg.CheckpointRestoreTimeout = v1.Duration(*crTimeout)
+	cfg.ForwardConnectTimeout = v1.Duration(*forwardConnectTimeout)
 	if err := cfg.Write(opt); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}

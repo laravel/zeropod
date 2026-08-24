@@ -59,6 +59,7 @@ const (
 	DefaultCapacityRequest          = false
 	DefaultReuseportActivator       = false
 	DefaultCheckpointRestoreTimeout = Duration(time.Minute)
+	DefaultForwardConnectTimeout    = Duration(time.Minute)
 )
 
 var ContainerdAnnotations = []string{
@@ -109,7 +110,10 @@ type Config struct {
 	// CheckpointRestoreTimeout limits runc checkpoint and restore call
 	// duration.
 	CheckpointRestoreTimeout Duration `json:"checkpointRestoreTimeout"`
-	AnnotationConfig         `json:"-"`
+	// ForwardConnectTimeout configures the connect timeout when forwarding
+	// connections during capacity eviction.
+	ForwardConnectTimeout Duration `json:"forwardConnectTimeout"`
+	AnnotationConfig      `json:"-"`
 }
 
 type Duration time.Duration
@@ -290,6 +294,7 @@ func NewConfig(ctx context.Context, spec *specs.Spec) (*Config, error) {
 		CapacityRequest:          DefaultCapacityRequest,
 		ReuseportActivator:       DefaultReuseportActivator,
 		CheckpointRestoreTimeout: DefaultCheckpointRestoreTimeout,
+		ForwardConnectTimeout:    DefaultForwardConnectTimeout,
 	}
 	path, err := relativeConfigFile()
 	if err != nil {
