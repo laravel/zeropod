@@ -274,7 +274,9 @@ func (act *Activator) Stop(_ context.Context) {
 	for _, ln := range act.listeners {
 		ln.wake.close()
 		ln.probe.close()
-		ln.forwarder.close()
+		if ln.forwarder != nil {
+			ln.forwarder.close()
+		}
 		if ln.reuse != nil {
 			_ = ln.reuse.Close()
 		}
