@@ -203,10 +203,9 @@ func (s *Server) SetPeekBufferSize(size int) {
 }
 
 // ForwardToTarget instructs the activator to forward any incoming traffic to
-// the specified address. The connHook and restoreHook will both be disabled.
+// the specified address. The restoreHook will be disabled.
 func (s *Server) ForwardToTarget(_ context.Context, addr string) error {
-	// disable hooks
-	s.connHook = func(c net.Conn) (net.Conn, bool, error) { return c, true, nil }
+	// disable restore hook, we still want to intercept probes
 	s.restoreHook = func() (int, error) { return 0, nil }
 	s.targetAddr = addr
 	s.forwardToTarget = true
