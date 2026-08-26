@@ -55,9 +55,11 @@ var (
 	migrationReadyTimeout   = flag.Duration("migration-ready-timeout", time.Minute*5, "how long to wait for migration to be ready")
 	autoGCMigrations        = flag.Bool("auto-gc-migrations", true, "automatically garbage collect migrations when owning pod is deleted")
 
-	capacityEvictionTimeout   = flag.Duration("capacity-eviction-timeout", time.Minute, "how long to wait for capacity eviction")
-	capacityEvictionThreshold = flag.Float64("capacity-eviction-threshold", 1.0, "the threshold when capacity eviction starts. Can be above 1.0 for overprovisioning.")
-	capacitySystemMemory      = flag.Bool("capacity-system-memory", false, "use system memory instead of pod requests for capacity tracking")
+	capacityEvictionTimeout      = flag.Duration("capacity-eviction-timeout", time.Minute, "how long to wait for capacity eviction")
+	capacityEvictionThreshold    = flag.Float64("capacity-eviction-threshold", 1.0, "the threshold when capacity eviction starts. Can be above 1.0 for overprovisioning.")
+	capacityEvictionThresholdCPU = flag.Float64("capacity-eviction-threshold-cpu", 1.0, "the threshold for cpu when capacity eviction starts. Overrides generic threshold.")
+	capacityEvictionThresholdMem = flag.Float64("capacity-eviction-threshold-memory", 1.0, "the threshold for memory when capacity eviction starts. Overrides generic threshold.")
+	capacitySystemMemory         = flag.Bool("capacity-system-memory", false, "use system memory instead of pod requests for capacity tracking")
 
 	version   = ""
 	revision  = ""
@@ -171,10 +173,21 @@ func main() {
 	}()
 
 	var cap capacity.Tracker
+	cpuThreshold, memoryThreshold := *capacityEvictionThreshold, *capacityEvictionThreshold
+	if *capacityEvictionThresholdCPU != *capacityEvictionThreshold {
+		cpuThreshold = *capacityEvictionThresholdCPU
+	}
+	if *capacityEvictionThresholdMem != *capacityEvictionThreshold {
+		memoryThreshold = *capacityEvictionThresholdMem
+	}
+	trackerOpts := []capacity.TrackerOption{
+		capacity.CPUThreshold(cpuThreshold),
+		capacity.MemoryThreshold(memoryThreshold),
+	}
 	if *capacitySystemMemory {
-		cap = capacity.NewSystemMemoryTracker(registry, nodeName, *capacityEvictionThreshold)
+		cap = capacity.NewSystemMemoryTracker(registry, nodeName, trackerOpts...)
 	} else {
-		cap = capacity.NewNodeTracker(registry, nodeName, *capacityEvictionThreshold)
+		cap = capacity.NewNodeTracker(registry, nodeName, trackerOpts...)
 	}
 	nodeServer, err := node.NewServer(
 		*nodeServerAddr,

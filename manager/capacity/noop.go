@@ -36,7 +36,7 @@ func (n *NoopTracker) UseCheckpointMemory() bool {
 }
 
 // Threshold implements [Tracker].
-func (n *NoopTracker) Threshold() float64 {
+func (n *NoopTracker) Threshold(_ corev1.ResourceName) float64 {
 	return 1.0
 }
 
