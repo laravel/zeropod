@@ -457,17 +457,19 @@ const agnHostImage = "registry.k8s.io/e2e-test-images/agnhost:2.39"
 func agnContainer(name string, port int) podOption {
 	return addContainer(
 		name, agnHostImage,
+		nil,
 		[]string{"netexec", fmt.Sprintf("--http-port=%d", port), "--udp-port=-1"},
 		port,
 	)
 }
 
-func addContainer(name, image string, args []string, ports ...int) podOption {
+func addContainer(name, image string, command []string, args []string, ports ...int) podOption {
 	return func(p *pod) {
 		container := corev1.Container{
-			Name:  name,
-			Image: image,
-			Args:  args,
+			Name:    name,
+			Image:   image,
+			Args:    args,
+			Command: command,
 		}
 		for _, port := range ports {
 			container.Ports = append(container.Ports, corev1.ContainerPort{ContainerPort: int32(port)})
@@ -494,7 +496,7 @@ func testPod(opts ...podOption) *corev1.Pod {
 	}
 
 	if len(p.Spec.Containers) == 0 {
-		addContainer("nginx", "nginx", nil, 80)(&pod{meta: &p.ObjectMeta, spec: &p.Spec})
+		addContainer("nginx", "nginx", nil, nil, 80)(&pod{meta: &p.ObjectMeta, spec: &p.Spec})
 	}
 
 	return p

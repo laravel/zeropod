@@ -556,7 +556,7 @@ func (c *Container) getListeners(ports ...uint16) activator.Listeners {
 		return emptyListeners(ports...)
 	}
 
-	lns, err := c.loadListeners()
+	lns, err := c.loadListeners(ports...)
 	if err == nil {
 		return lns
 	}
@@ -566,7 +566,7 @@ func (c *Container) getListeners(ports ...uint16) activator.Listeners {
 		if err != nil && !strings.Contains(err.Error(), "no child processes") {
 			log.G(c.context).WithError(err).Errorf("calling zeropod-migrate: %s", out)
 		} else {
-			lns, err := c.loadListeners()
+			lns, err := c.loadListeners(ports...)
 			if err == nil {
 				return lns
 			}

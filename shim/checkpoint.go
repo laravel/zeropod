@@ -186,7 +186,7 @@ func (c *Container) storeListeners(ctx context.Context) error {
 	return json.NewEncoder(f).Encode(c.activator.GetListeners(ctx, c.Pid()))
 }
 
-func (c *Container) loadListeners() (activator.Listeners, error) {
+func (c *Container) loadListeners(ports ...uint16) (activator.Listeners, error) {
 	f, err := os.Open(nodev1.ListenersFile(c.ID()))
 	if err != nil {
 		return nil, err
@@ -197,7 +197,14 @@ func (c *Container) loadListeners() (activator.Listeners, error) {
 	if err := json.NewDecoder(f).Decode(&listeners); err != nil {
 		return nil, err
 	}
-	return listeners, nil
+
+	filtered := activator.Listeners{}
+	for _, ln := range listeners {
+		if slices.Contains(ports, ln.Port) {
+			filtered = append(filtered, ln)
+		}
+	}
+	return filtered, nil
 }
 
 func printCriuLogs(ctx context.Context, file string) string {
