@@ -401,12 +401,6 @@ func (w *wrapper) Kill(ctx context.Context, r *taskAPI.KillRequest) (*emptypb.Em
 
 		log.G(ctx).Infof("requested container %s to be killed", r.ID)
 		zeropodContainer.Stop(ctx)
-
-		if err := zeropodContainer.Process().Kill(ctx, r.Signal, r.All); err != nil {
-			return nil, errdefs.Resolve(err)
-		}
-
-		zeropodContainer.InitialProcess().SetExited(0)
 	}
 
 	return w.service.Kill(ctx, r)
