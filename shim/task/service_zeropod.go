@@ -311,6 +311,7 @@ func (w *wrapper) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAP
 	log.G(ctx).Infof("delete called in zeropod: %s", zeropodContainer.ID())
 
 	if r.ExecID == "" {
+		zeropodContainer.Stop(ctx)
 		w.deleteZeropodContainer(r.ID)
 	} else {
 		w.lifecycleMu.Lock()
@@ -394,13 +395,11 @@ func (w *wrapper) Kill(ctx context.Context, r *taskAPI.KillRequest) (*emptypb.Em
 			log.G(ctx).Infof("requested scaled down process %d to be killed", zeropodContainer.Process().Pid())
 			zeropodContainer.Process().SetExited(0)
 			zeropodContainer.InitialProcess().SetExited(0)
-			zeropodContainer.Stop(ctx)
-
 			return w.service.Kill(ctx, r)
 		}
 
 		log.G(ctx).Infof("requested container %s to be killed", r.ID)
-		zeropodContainer.Stop(ctx)
+		zeropodContainer.CancelScaleDown()
 	}
 
 	return w.service.Kill(ctx, r)
