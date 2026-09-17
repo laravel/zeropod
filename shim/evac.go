@@ -330,15 +330,15 @@ func (c *Container) checkConnectionDrainIn(in time.Duration, timeout time.Durati
 }
 
 func (c *Container) handleDrainCheck(in time.Duration, timeout time.Duration) {
+	if time.Now().After(c.drainStartTime.Add(timeout)) {
+		log.G(c.context).Info("drain timed out")
+		c.ExitOK(c.context)
+		return
+	}
 	lastConnect := c.activator.ForwardLastConnect()
 	if time.Since(lastConnect) < drainCheckInterval {
 		log.G(c.context).Infof("last forward connect was %s ago, delaying drain", time.Since(lastConnect))
 		c.checkConnectionDrainIn(in, timeout)
-		return
-	}
-	if time.Now().After(c.drainStartTime.Add(timeout)) {
-		log.G(c.context).Info("drain timed out")
-		c.ExitOK(c.context)
 		return
 	}
 	var last time.Time
