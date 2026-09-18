@@ -67,7 +67,8 @@ bench:
 	go test -bench=. -benchtime=10x -v -run=Bench ./e2e/
 
 test:
-	go test -v -short ./... $(testargs)
+	go test -v -short -p 1 ./activator/... $(testargs)
+	go test -v -short -skip 'TestActivator|TestReuseActivator' ./... $(testargs)
 
 # docker-e2e runs the e2e test in a docker container. However, as running the
 # e2e test requires a docker socket (for kind), this mounts the docker socket
@@ -81,7 +82,7 @@ docker-bench: build-test
 
 # has to have SYS_ADMIN because the test tries to set netns and mount bpffs
 docker-test: build-test
-	docker run --rm -ti --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --pid=host --userns=host -v $(PWD):/app $(TEST_IMAGE) go test -v -short ./... $(testargs)
+	docker run --rm -ti --cap-add=SYS_ADMIN --cap-add=NET_ADMIN --pid=host --userns=host -v $(PWD):/app $(TEST_IMAGE) make test testargs='$(testargs)'
 
 CLANG ?= clang
 CFLAGS := -O2 -g -Wall -Werror
