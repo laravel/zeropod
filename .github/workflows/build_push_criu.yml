@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - org-move
     paths:
       - criu/**
 

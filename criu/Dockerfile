@@ -6,7 +6,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     gnutls-dev uuid-dev
 
 WORKDIR /workspace
-
 RUN git clone https://github.com/checkpoint-restore/criu.git
 WORKDIR /workspace/criu
 ADD criu/*.patch .
