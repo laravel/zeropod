@@ -10,10 +10,10 @@ components:
   - ../reuseport-activator
 images:
   - name: manager
-    newName: ghcr.io/ctrox/zeropod-manager
+    newName: docker.io/laravelphp/zeropod-manager
     newTag: dev
   - name: installer
-    newName: ghcr.io/ctrox/zeropod-installer
+    newName: docker.io/laravelphp/zeropod-installer
     newTag: dev
 patches:
   - patch: |-

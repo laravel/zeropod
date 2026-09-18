@@ -6,8 +6,9 @@ on:
       - cmd/freezer/**
 
 env:
-  REGISTRY: ghcr.io
-  FREEZER_IMAGE_NAME: ${{ github.repository }}-freezer
+  REGISTRY: docker.io
+  IMAGE_NAMESPACE: laravelphp
+  FREEZER_IMAGE_NAME: zeropod-freezer
 
 jobs:
   push_to_registry:
@@ -22,8 +23,8 @@ jobs:
         uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # v2
@@ -32,7 +33,7 @@ jobs:
         id: meta_freezer
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
-          images: ${{ env.REGISTRY }}/${{ env.FREEZER_IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.FREEZER_IMAGE_NAME }}
 
       - name: Build and push freezer
         uses: docker/build-push-action@0a97817b6ade9f46837855d676c4cca3a2471fc9 # v4
@@ -41,5 +42,5 @@ jobs:
           file: ./cmd/freezer/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.FREEZER_IMAGE_NAME }}:latest
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.FREEZER_IMAGE_NAME }}:latest
           labels: ${{ steps.meta_freezer.outputs.labels }}

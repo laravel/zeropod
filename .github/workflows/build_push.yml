@@ -6,10 +6,11 @@ on:
       - "*"
 
 env:
-  REGISTRY: ghcr.io
-  INSTALLER_IMAGE_NAME: ${{ github.repository }}-installer
-  MANAGER_IMAGE_NAME: ${{ github.repository }}-manager
-  CRIU_IMAGE_NAME: ${{ github.repository }}-criu
+  REGISTRY: docker.io
+  IMAGE_NAMESPACE: laravelphp
+  INSTALLER_IMAGE_NAME: zeropod-installer
+  MANAGER_IMAGE_NAME: zeropod-manager
+  CRIU_IMAGE_NAME: zeropod-criu
   CRIU_VERSION: v4.2.1
 
 jobs:
@@ -25,8 +26,8 @@ jobs:
         uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # v2
@@ -35,13 +36,13 @@ jobs:
         id: meta_installer
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
-          images: ${{ env.REGISTRY }}/${{ env.INSTALLER_IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.INSTALLER_IMAGE_NAME }}
 
       - name: Extract metadata for manager
         id: meta_manager
         uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
         with:
-          images: ${{ env.REGISTRY }}/${{ env.MANAGER_IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.MANAGER_IMAGE_NAME }}
 
       - name: Build and push installer
         uses: docker/build-push-action@0a97817b6ade9f46837855d676c4cca3a2471fc9 # v4
@@ -63,4 +64,4 @@ jobs:
           tags: ${{ steps.meta_manager.outputs.tags }}
           labels: ${{ steps.meta_manager.outputs.labels }}
           build-args: |
-            CRIU_IMAGE=${{ env.REGISTRY }}/${{ env.CRIU_IMAGE_NAME }}:${{ env.CRIU_VERSION }}
+            CRIU_IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/${{ env.CRIU_IMAGE_NAME }}:${{ env.CRIU_VERSION }}

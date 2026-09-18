@@ -1,5 +1,5 @@
-REGISTRY := ghcr.io
-NAMESPACE := ctrox
+REGISTRY := docker.io
+NAMESPACE := laravelphp
 TAG := dev
 INSTALLER_IMAGE := $(REGISTRY)/$(NAMESPACE)/zeropod-installer:$(TAG)
 MANAGER_IMAGE := $(REGISTRY)/$(NAMESPACE)/zeropod-manager:$(TAG)

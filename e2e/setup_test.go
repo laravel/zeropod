@@ -61,8 +61,8 @@ import (
 )
 
 const (
-	installerImage      = "ghcr.io/ctrox/zeropod-installer:dev"
-	managerImage        = "ghcr.io/ctrox/zeropod-manager:dev"
+	installerImage      = "docker.io/laravelphp/zeropod-installer:dev"
+	managerImage        = "docker.io/laravelphp/zeropod-manager:dev"
 	installerDockerfile = "../cmd/installer/Dockerfile"
 	managerDockerfile   = "../cmd/manager/Dockerfile"
 	kustomizeDir        = "../config/kind"
@@ -573,7 +573,7 @@ func freezerDeployment(name, namespace string, memoryMiB int, opts ...podOption)
 					RuntimeClassName: new(v1.RuntimeClassName),
 					Containers: []corev1.Container{{
 						Name:            "freezer",
-						Image:           "ghcr.io/ctrox/zeropod-freezer",
+						Image:           "docker.io/laravelphp/zeropod-freezer",
 						ImagePullPolicy: corev1.PullIfNotPresent,
 						Command:         []string{"/freezer"},
 						Args:            []string{"-memory", strconv.Itoa(memoryMiB)},
