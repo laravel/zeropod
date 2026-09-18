@@ -27,9 +27,9 @@ import (
 	"github.com/moby/sys/userns"
 
 	"github.com/containerd/typeurl/v2"
-	"github.com/ctrox/zeropod/activator"
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
-	zshim "github.com/ctrox/zeropod/shim"
+	"github.com/laravel/zeropod/activator"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
+	zshim "github.com/laravel/zeropod/shim"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
 

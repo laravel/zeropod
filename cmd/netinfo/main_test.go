@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ctrox/zeropod/activator"
-	nodev1 "github.com/ctrox/zeropod/api/node/v1"
+	"github.com/laravel/zeropod/activator"
+	nodev1 "github.com/laravel/zeropod/api/node/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

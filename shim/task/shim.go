@@ -11,7 +11,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/shim"
 	"github.com/containerd/log"
 	"github.com/containerd/ttrpc"
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
 )
 
 func shimSocketAddress(containerdSocket string) string {

@@ -697,7 +697,7 @@ const file_node_proto_rawDesc = "" +
 	"\rFinishRestore\x12\x1f.zeropod.node.v1.RestoreRequest\x1a .zeropod.node.v1.RestoreResponse\x12Q\n" +
 	"\x10NewCriuLazyPages\x12%.zeropod.node.v1.CriuLazyPagesRequest\x1a\x16.google.protobuf.Empty\x12H\n" +
 	"\tPullImage\x12!.zeropod.node.v1.PullImageRequest\x1a\x16.zeropod.node.v1.Image0\x01\x12d\n" +
-	"\x0fRestoreCapacity\x12'.zeropod.node.v1.RestoreCapacityRequest\x1a(.zeropod.node.v1.RestoreCapacityResponseB*Z(github.com/ctrox/zeropod/api/node/v1/;v1b\x06proto3"
+	"\x0fRestoreCapacity\x12'.zeropod.node.v1.RestoreCapacityRequest\x1a(.zeropod.node.v1.RestoreCapacityResponseB,Z*github.com/laravel/zeropod/api/node/v1/;v1b\x06proto3"
 
 var (
 	file_node_proto_rawDescOnce sync.Once

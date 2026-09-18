@@ -9,8 +9,8 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/ctrox/zeropod/activator"
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
+	"github.com/laravel/zeropod/activator"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

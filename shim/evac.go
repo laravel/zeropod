@@ -15,9 +15,9 @@ import (
 	runcC "github.com/containerd/go-runc"
 	"github.com/containerd/log"
 	"github.com/containerd/ttrpc"
-	"github.com/ctrox/zeropod/activator"
-	nodev1 "github.com/ctrox/zeropod/api/node/v1"
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
+	"github.com/laravel/zeropod/activator"
+	nodev1 "github.com/laravel/zeropod/api/node/v1"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
 	"github.com/prometheus/procfs"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )

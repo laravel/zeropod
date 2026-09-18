@@ -28,10 +28,10 @@ different Kubernetes distributions.
 ```bash
 # install zeropod runtime and manager
 # "default" installation:
-kubectl apply -k https://github.com/ctrox/zeropod/config/production
+kubectl apply -k https://github.com/laravel/zeropod/config/production
 
 # GKE:
-kubectl apply -k https://github.com/ctrox/zeropod/config/gke
+kubectl apply -k https://github.com/laravel/zeropod/config/gke
 ```
 
 > ⚠️⚠️⚠️ For k3s and rke2, the initial installation needs to restart the
@@ -41,10 +41,10 @@ kubectl apply -k https://github.com/ctrox/zeropod/config/gke
 
 ```bash
 # k3s:
-kubectl apply -k https://github.com/ctrox/zeropod/config/k3s
+kubectl apply -k https://github.com/laravel/zeropod/config/k3s
 
 # rke2:
-kubectl apply -k https://github.com/ctrox/zeropod/config/rke2
+kubectl apply -k https://github.com/laravel/zeropod/config/rke2
 ```
 
 By default, zeropod will only be installed on nodes with the label
@@ -67,7 +67,7 @@ Now you can create workloads which make use of zeropod.
 
 ```bash
 # create an example pod which makes use of zeropod
-kubectl apply -f https://github.com/ctrox/zeropod/config/examples/nginx.yaml
+kubectl apply -f https://github.com/laravel/zeropod/config/examples/nginx.yaml
 ```
 
 Depending on your cluster setup, none of the predefined configs might not
@@ -82,7 +82,7 @@ do the cleanup on all labelled zeropod nodes. After all the uninstall pods
 have finished, we can delete all the manifests.
 
 ```bash
-kubectl apply -k https://github.com/ctrox/zeropod/config/uninstall
+kubectl apply -k https://github.com/laravel/zeropod/config/uninstall
 kubectl -n zeropod-system wait --for=condition=Ready pod -l app.kubernetes.io/name=zeropod-node
-kubectl delete -k https://github.com/ctrox/zeropod/config/production
+kubectl delete -k https://github.com/laravel/zeropod/config/production
 ```

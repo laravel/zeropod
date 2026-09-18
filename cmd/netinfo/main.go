@@ -11,8 +11,8 @@ import (
 
 	"github.com/checkpoint-restore/go-criu/v8/crit"
 	"github.com/checkpoint-restore/go-criu/v8/crit/images/fdinfo"
-	"github.com/ctrox/zeropod/activator"
-	nodev1 "github.com/ctrox/zeropod/api/node/v1"
+	"github.com/laravel/zeropod/activator"
+	nodev1 "github.com/laravel/zeropod/api/node/v1"
 )
 
 var (

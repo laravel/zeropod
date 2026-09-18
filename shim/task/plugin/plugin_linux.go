@@ -22,7 +22,7 @@ import (
 	"github.com/containerd/containerd/v2/plugins"
 	"github.com/containerd/plugin"
 	"github.com/containerd/plugin/registry"
-	"github.com/ctrox/zeropod/shim/task"
+	"github.com/laravel/zeropod/shim/task"
 )
 
 func init() {

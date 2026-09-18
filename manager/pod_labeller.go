@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"path"
 
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 

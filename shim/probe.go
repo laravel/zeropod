@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/containerd/log"
-	"github.com/ctrox/zeropod/activator"
+	"github.com/laravel/zeropod/activator"
 )
 
 func (c *Container) detectProbe(ctx context.Context) activator.ConnHook {

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
 )
 
 // getLogPath gets the log path of the container by searching for the last log

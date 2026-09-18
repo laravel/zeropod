@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/cilium/ebpf"
-	"github.com/ctrox/zeropod/activator"
+	"github.com/laravel/zeropod/activator"
 	"golang.org/x/sys/unix"
 )
 

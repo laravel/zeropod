@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/containerd/ttrpc"
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
 	"github.com/fsnotify/fsnotify"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"

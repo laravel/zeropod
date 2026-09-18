@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/types/known/durationpb"

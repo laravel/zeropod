@@ -1,4 +1,4 @@
-module github.com/ctrox/zeropod
+module github.com/laravel/zeropod
 
 go 1.26.3
 

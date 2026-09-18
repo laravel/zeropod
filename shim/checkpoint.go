@@ -15,10 +15,10 @@ import (
 	"github.com/containerd/containerd/v2/cmd/containerd-shim-runc-v2/process"
 	runcC "github.com/containerd/go-runc"
 	"github.com/containerd/log"
-	"github.com/ctrox/zeropod/activator"
-	nodev1 "github.com/ctrox/zeropod/api/node/v1"
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
 	"github.com/icza/backscanner"
+	"github.com/laravel/zeropod/activator"
+	nodev1 "github.com/laravel/zeropod/api/node/v1"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
 )
 
 func (c *Container) scaleDown(ctx context.Context) error {

@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ctrox/zeropod/activator"
+	"github.com/laravel/zeropod/activator"
 )
 
 type probeListener struct {

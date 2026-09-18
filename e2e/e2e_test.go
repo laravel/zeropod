@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
-	"github.com/ctrox/zeropod/manager"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
+	"github.com/laravel/zeropod/manager"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 	"github.com/stretchr/testify/assert"

@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	nodev1 "github.com/ctrox/zeropod/api/node/v1"
-	v1 "github.com/ctrox/zeropod/api/runtime/v1"
+	nodev1 "github.com/laravel/zeropod/api/node/v1"
+	v1 "github.com/laravel/zeropod/api/runtime/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"

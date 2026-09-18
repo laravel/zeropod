@@ -9,7 +9,7 @@ CRIU_IMAGE := $(REGISTRY)/$(NAMESPACE)/zeropod-criu:$(CRIU_VERSION)
 DOCKER_SOCK := /var/run/docker.sock
 EBPF_IMAGE := $(REGISTRY)/$(NAMESPACE)/zeropod-ebpf:$(TAG)
 # versioning
-PKG=github.com/ctrox/zeropod
+PKG=github.com/laravel/zeropod
 CONTAINERD_PKG=github.com/containerd/containerd/v2
 VERSION ?= $(shell git describe --match 'v[0-9]*' --dirty='.m' --always --tags)
 REVISION=$(shell git rev-parse HEAD)$(shell if ! git diff --no-ext-diff --quiet --exit-code; then echo .m; fi)

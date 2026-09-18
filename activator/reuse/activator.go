@@ -19,7 +19,7 @@ import (
 	"github.com/containerd/cgroups/v3/cgroup2"
 	"github.com/containerd/log"
 	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/ctrox/zeropod/activator"
+	"github.com/laravel/zeropod/activator"
 )
 
 //go:generate go run github.com/cilium/ebpf/cmd/bpf2go -cc $BPF_CLANG -cflags $BPF_CFLAGS reuseport reuseport.c -- -I/headers

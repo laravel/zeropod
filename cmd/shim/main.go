@@ -11,10 +11,10 @@ import (
 	"github.com/containerd/containerd/api/types"
 	"github.com/containerd/containerd/v2/cmd/containerd-shim-runc-v2/manager"
 	"github.com/containerd/containerd/v2/pkg/shim"
-	"github.com/ctrox/zeropod/activator"
-	shimv1 "github.com/ctrox/zeropod/api/shim/v1"
-	zshim "github.com/ctrox/zeropod/shim"
-	_ "github.com/ctrox/zeropod/shim/task/plugin"
+	"github.com/laravel/zeropod/activator"
+	shimv1 "github.com/laravel/zeropod/api/shim/v1"
+	zshim "github.com/laravel/zeropod/shim"
+	_ "github.com/laravel/zeropod/shim/task/plugin"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
 

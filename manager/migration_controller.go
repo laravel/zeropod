@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"os"
 
-	nodev1 "github.com/ctrox/zeropod/api/node/v1"
-	v1 "github.com/ctrox/zeropod/api/runtime/v1"
+	nodev1 "github.com/laravel/zeropod/api/node/v1"
+	v1 "github.com/laravel/zeropod/api/runtime/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"

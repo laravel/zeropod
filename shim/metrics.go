@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 
 	"github.com/checkpoint-restore/go-criu/v8/stats"
-	nodev1 "github.com/ctrox/zeropod/api/node/v1"
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
+	nodev1 "github.com/laravel/zeropod/api/node/v1"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
 	"golang.org/x/sys/unix"
 )
 

@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/containerd/ttrpc"
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
 	"github.com/prometheus/client_golang/prometheus"
 )
 

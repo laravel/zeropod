@@ -22,7 +22,7 @@ import (
 	"github.com/cilium/ebpf"
 	"github.com/containerd/log"
 	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/ctrox/zeropod/activator"
+	"github.com/laravel/zeropod/activator"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

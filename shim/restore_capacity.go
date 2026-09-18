@@ -7,7 +7,7 @@ import (
 
 	"github.com/containerd/log"
 	"github.com/containerd/ttrpc"
-	nodev1 "github.com/ctrox/zeropod/api/node/v1"
+	nodev1 "github.com/laravel/zeropod/api/node/v1"
 )
 
 func (c *Container) restoreCapacityRequest(ctx context.Context) (*nodev1.RestoreCapacityResponse, error) {

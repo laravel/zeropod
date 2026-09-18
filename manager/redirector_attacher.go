@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/containernetworking/plugins/pkg/ns"
-	"github.com/ctrox/zeropod/activator"
-	v1 "github.com/ctrox/zeropod/api/shim/v1"
 	"github.com/fsnotify/fsnotify"
+	"github.com/laravel/zeropod/activator"
+	v1 "github.com/laravel/zeropod/api/shim/v1"
 )
 
 type Redirector struct {

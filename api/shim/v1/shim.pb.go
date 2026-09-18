@@ -561,7 +561,7 @@ const file_shim_proto_rawDesc = "" +
 	"\x04Shim\x12L\n" +
 	"\aMetrics\x12\x1f.zeropod.shim.v1.MetricsRequest\x1a .zeropod.shim.v1.MetricsResponse\x12P\n" +
 	"\tGetStatus\x12!.zeropod.shim.v1.ContainerRequest\x1a .zeropod.shim.v1.ContainerStatus\x12^\n" +
-	"\x0fSubscribeStatus\x12'.zeropod.shim.v1.SubscribeStatusRequest\x1a .zeropod.shim.v1.ContainerStatus0\x01B*Z(github.com/ctrox/zeropod/api/shim/v1/;v1b\x06proto3"
+	"\x0fSubscribeStatus\x12'.zeropod.shim.v1.SubscribeStatusRequest\x1a .zeropod.shim.v1.ContainerStatus0\x01B,Z*github.com/laravel/zeropod/api/shim/v1/;v1b\x06proto3"
 
 var (
 	file_shim_proto_rawDescOnce sync.Once

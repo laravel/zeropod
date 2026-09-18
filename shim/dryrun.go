@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/containerd/log"
-	"github.com/ctrox/zeropod/activator"
+	"github.com/laravel/zeropod/activator"
 )
 
 // dryRunPollInterval is how often we recheck activity while in a simulated
