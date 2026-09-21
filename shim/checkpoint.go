@@ -52,7 +52,6 @@ func (c *Container) kill(ctx context.Context) error {
 	c.CheckpointRestore.Lock()
 	defer c.CheckpointRestore.Unlock()
 	log.G(ctx).Infof("checkpointing is disabled, scaling down by killing")
-	c.AddCheckpointedPID(c.Pid())
 
 	// we access the initProcess so we can force delete
 	initProcess, ok := c.process.(*process.Init)
@@ -108,7 +107,6 @@ func (c *Container) checkpoint(ctx context.Context) error {
 	}
 
 	resetOnErr := func() {
-		c.DeleteCheckpointedPID(c.Pid())
 		_ = c.activator.DisableRedirects()
 		lines := printCriuLogs(ctx, filepath.Join(workDir, "dump.log"))
 		c.sendFailEvent(v1.ContainerPhase_CHECKPOINT_FAILED, lines)
@@ -137,7 +135,6 @@ func (c *Container) checkpoint(ctx context.Context) error {
 		opts.ParentPath = nodev1.RelativePreDumpDir()
 	}
 
-	c.AddCheckpointedPID(c.Pid())
 	// ImagePath is always the same, regardless of pre-dump
 	opts.ImagePath = snapshotDir
 

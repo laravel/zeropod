@@ -20,7 +20,6 @@ import (
 	"github.com/containerd/containerd/v2/pkg/shim"
 	"github.com/containerd/containerd/v2/pkg/shutdown"
 	"github.com/containerd/containerd/v2/pkg/sys/reaper"
-	"github.com/containerd/errdefs"
 	runcC "github.com/containerd/go-runc"
 	"github.com/containerd/log"
 	"github.com/containerd/ttrpc"
@@ -411,39 +410,41 @@ func (w *wrapper) processExits() {
 		w.lifecycleMu.Lock()
 		cps := w.running[e.Pid]
 		w.lifecycleMu.Unlock()
-		preventExit := false
-		for _, cp := range cps {
-			if w.preventExit(cp) {
-				preventExit = true
-			}
-		}
-		if preventExit {
-			// cleanup running and exec maps
-			w.lifecycleMu.Lock()
-			delete(w.running, e.Pid)
-			for _, cp := range cps {
-				delete(w.execCountSubscribers, cp.Container)
-				delete(w.runningExecs, cp.Container)
-			}
-			w.lifecycleMu.Unlock()
-			continue
-		}
-		// pass event to service exit channel
-		w.ec <- e
+		// handleExit may block while C/R is running so don't let this block
+		// other containers from exiting.
+		go w.handleExit(e, cps)
 	}
+}
+
+func (w *wrapper) handleExit(e runcC.Exit, cps []containerProcess) {
+	preventExit := false
+	for _, cp := range cps {
+		if w.preventExit(cp) {
+			preventExit = true
+		}
+	}
+	if preventExit {
+		// cleanup running and exec maps
+		w.lifecycleMu.Lock()
+		delete(w.running, e.Pid)
+		for _, cp := range cps {
+			delete(w.execCountSubscribers, cp.Container)
+			delete(w.runningExecs, cp.Container)
+		}
+		w.lifecycleMu.Unlock()
+		return
+	}
+	// pass event to service exit channel
+	w.ec <- e
 }
 
 func (w *wrapper) preventExit(cp containerProcess) bool {
 	zeropodContainer, ok := w.getZeropodContainer(cp.Container.ID)
 	if ok {
+		zeropodContainer.CheckpointRestore.Lock()
+		defer zeropodContainer.CheckpointRestore.Unlock()
 		if zeropodContainer.ScaledDown() {
 			log.G(w.context).Infof("not setting exited because process has scaled down: %v", cp.Process.Pid())
-			return true
-		}
-
-		if zeropodContainer.CheckpointedPID(cp.Process.Pid()) {
-			log.G(w.context).Infof("not setting exited because process has been checkpointed: %v", cp.Process.Pid())
-			zeropodContainer.DeleteCheckpointedPID(cp.Process.Pid())
 			return true
 		}
 
