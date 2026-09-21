@@ -121,7 +121,10 @@ func (c *Container) checkpoint(ctx context.Context) error {
 		opts.ImagePath = nodev1.PreDumpDir(c.ID())
 
 		beforePreDump := time.Now()
-		if err := initProcess.Runtime().Checkpoint(ctx, c.ID(), opts, runcC.PreDump); err != nil {
+		preDumpCtx, preDumpCancel := context.WithTimeout(ctx, time.Duration(c.cfg.CheckpointRestoreTimeout))
+		err := initProcess.Runtime().Checkpoint(preDumpCtx, c.ID(), opts, runcC.PreDump)
+		preDumpCancel()
+		if err != nil {
 			log.G(ctx).Errorf("error pre-dumping container: %s", err)
 			resetOnErr()
 			return err
@@ -139,7 +142,11 @@ func (c *Container) checkpoint(ctx context.Context) error {
 	opts.ImagePath = snapshotDir
 
 	beforeCheckpoint := time.Now()
-	if err := initProcess.Runtime().Checkpoint(ctx, c.ID(), opts); err != nil {
+	if err := func() error {
+		runcCtx, runcCancel := context.WithTimeout(ctx, time.Duration(c.cfg.CheckpointRestoreTimeout))
+		defer runcCancel()
+		return initProcess.Runtime().Checkpoint(runcCtx, c.ID(), opts)
+	}(); err != nil {
 		log.G(ctx).Errorf("error checkpointing container: %s", err)
 		resetOnErr()
 		return err
