@@ -547,30 +547,25 @@ func (c *Container) cancelInit() {
 	c.initTimer.Stop()
 }
 
-// getListeners prepares the activator listeners from a migrated snapshot. It
-// first tries to load them from an existing zeropod_listeners.json and if
-// that's not present it will call [nodev1.NetinfoBinary] to extract the from
-// the criu checkpoint.
+// getListeners prepares the activator listeners from a migrated snapshot. If
+// this container has been migrated it will call [nodev1.NetinfoBinary] to
+// extract/write the listeners from the criu checkpoint since that's the most
+// accurate representation.
 func (c *Container) getListeners(ports ...uint16) activator.Listeners {
 	if c.cfg.DisableCheckpointing {
 		return emptyListeners(ports...)
 	}
 
-	lns, err := c.loadListeners(ports...)
-	if err == nil {
-		return lns
-	}
-
 	if c.SkipStart() {
 		out, err := exec.Command(nodev1.NetinfoBinary, "-id", c.ID()).CombinedOutput()
 		if err != nil && !strings.Contains(err.Error(), "no child processes") {
-			log.G(c.context).WithError(err).Errorf("calling zeropod-migrate: %s", out)
-		} else {
-			lns, err := c.loadListeners(ports...)
-			if err == nil {
-				return lns
-			}
+			log.G(c.context).WithError(err).Errorf("calling %s: %s", nodev1.NetinfoBinary, out)
 		}
+	}
+
+	lns, err := c.loadListeners(ports...)
+	if err == nil {
+		return lns
 	}
 
 	return emptyListeners(ports...)
