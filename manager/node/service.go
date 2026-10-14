@@ -134,7 +134,8 @@ func NewServer(addr string, kube client.Client, log *slog.Logger, timeouts Timeo
 		"name", nodeName,
 		"live_migration_supported", liveMigrationSupported,
 		"capacity_tracker", reflect.TypeOf(cap).String(),
-		"eviction_threshold", cap.Threshold(),
+		"eviction_threshold_cpu", cap.Threshold(corev1.ResourceCPU),
+		"eviction_threshold_memory", cap.Threshold(corev1.ResourceMemory),
 	)
 	return &Server{
 		ttrpc:        s,
@@ -360,7 +361,7 @@ func (ns *nodeService) hasCapacity(res corev1.ResourceList) bool {
 			"cap", cpuCap.String(),
 			"total_req", cpuRequested.String(),
 			"container_req", res.Cpu().String(),
-			"threshold", ns.cap.Threshold(),
+			"threshold", ns.cap.Threshold(corev1.ResourceCPU),
 		)
 		return false
 	}
@@ -369,7 +370,7 @@ func (ns *nodeService) hasCapacity(res corev1.ResourceList) bool {
 			"cap", memCap.String(),
 			"total_req", memRequested.String(),
 			"container_req", res.Memory().String(),
-			"threshold", ns.cap.Threshold(),
+			"threshold", ns.cap.Threshold(corev1.ResourceMemory),
 		)
 		return false
 	}

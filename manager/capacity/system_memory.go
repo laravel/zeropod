@@ -16,8 +16,8 @@ type SystemMemoryTracker struct {
 }
 
 // NewSystemMemoryTracker creates a [SystemMemoryTracker].
-func NewSystemMemoryTracker(reg prometheus.Registerer, name string, threshold float64) Tracker {
-	return &SystemMemoryTracker{Tracker: NewNodeTracker(reg, name, threshold)}
+func NewSystemMemoryTracker(reg prometheus.Registerer, name string, opts ...TrackerOption) Tracker {
+	return &SystemMemoryTracker{Tracker: NewNodeTracker(reg, name, opts...)}
 }
 
 // Capacity gets the memory capacity from the total node memory.

@@ -31,18 +31,19 @@ type Tracker interface {
 	Requested(name corev1.ResourceName) resource.Quantity
 	SetCapacity(name corev1.ResourceName, q resource.Quantity)
 	SetRequested(name corev1.ResourceName, q resource.Quantity)
-	Threshold() float64
+	Threshold(name corev1.ResourceName) float64
 	IncEvicted()
 	UseCheckpointMemory() bool
 }
 
 type NodeTracker struct {
-	name      string
-	capacity  corev1.ResourceList
-	requested corev1.ResourceList
-	threshold float64
-	mu        sync.RWMutex
-	metrics   metrics
+	name            string
+	capacity        corev1.ResourceList
+	requested       corev1.ResourceList
+	cpuThreshold    float64
+	memoryThreshold float64
+	mu              sync.RWMutex
+	metrics         metrics
 }
 
 type metrics struct {
@@ -86,8 +87,15 @@ func (c *NodeTracker) IncEvicted() {
 }
 
 // Threshold where capacity eviction starts.
-func (c *NodeTracker) Threshold() float64 {
-	return c.threshold
+func (c *NodeTracker) Threshold(name corev1.ResourceName) float64 {
+	switch name {
+	case corev1.ResourceCPU:
+		return c.cpuThreshold
+	case corev1.ResourceMemory:
+		return c.memoryThreshold
+	default:
+		return 0
+	}
 }
 
 func (c *NodeTracker) UseCheckpointMemory() bool {
@@ -98,14 +106,38 @@ func (c *NodeTracker) metricLabels(resource string) prometheus.Labels {
 	return prometheus.Labels{labelNode: c.name, labelResource: resource}
 }
 
+type TrackerConfig struct {
+	cpuThreshold    float64
+	memoryThreshold float64
+}
+
+type TrackerOption func(cfg *TrackerConfig)
+
+func CPUThreshold(threshold float64) TrackerOption {
+	return func(cfg *TrackerConfig) {
+		cfg.cpuThreshold = threshold
+	}
+}
+
+func MemoryThreshold(threshold float64) TrackerOption {
+	return func(cfg *TrackerConfig) {
+		cfg.memoryThreshold = threshold
+	}
+}
+
 // NewNodeTracker creates a [NodeTracker].
-func NewNodeTracker(reg prometheus.Registerer, name string, threshold float64) Tracker {
+func NewNodeTracker(reg prometheus.Registerer, name string, opts ...TrackerOption) Tracker {
+	cfg := &TrackerConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
 	return &NodeTracker{
-		name:      name,
-		capacity:  corev1.ResourceList{},
-		requested: corev1.ResourceList{},
-		threshold: threshold,
-		mu:        sync.RWMutex{},
+		name:            name,
+		capacity:        corev1.ResourceList{},
+		requested:       corev1.ResourceList{},
+		cpuThreshold:    cfg.cpuThreshold,
+		memoryThreshold: cfg.memoryThreshold,
+		mu:              sync.RWMutex{},
 		metrics: metrics{
 			capacity: promauto.With(reg).NewGaugeVec(prometheus.GaugeOpts{
 				Namespace: metricsNamespace,
@@ -167,7 +199,7 @@ func RemoveTaint(node *corev1.Node) {
 // than capacity, or 1 if the requested is greater than capacity. Note that
 // capacity will be multiplied by the [Tracker] threshold.
 func CmpThreshold(cap Tracker, name corev1.ResourceName, requested resource.Quantity) int {
-	return requested.Cmp(multiplyQuantity(cap.Capacity(name), cap.Threshold()))
+	return requested.Cmp(multiplyQuantity(cap.Capacity(name), cap.Threshold(name)))
 }
 
 func multiplyQuantity(q resource.Quantity, factor float64) resource.Quantity {

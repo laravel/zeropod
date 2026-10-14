@@ -52,14 +52,15 @@ func TestSetContainerStatus(t *testing.T) {
 
 func TestRestoreCapacity(t *testing.T) {
 	for name, tc := range map[string]struct {
-		node          *corev1.Node
-		pod           *corev1.Pod
-		migration     *v1.Migration
-		threshold     float64
-		containerName string
-		allowed       bool
-		expectedErr   bool
-		podScaledDown bool
+		node            *corev1.Node
+		pod             *corev1.Pod
+		migration       *v1.Migration
+		cpuThreshold    float64
+		memoryThreshold float64
+		containerName   string
+		allowed         bool
+		expectedErr     bool
+		podScaledDown   bool
 	}{
 		"empty node": {
 			node: newNode("empty", nil),
@@ -67,19 +68,21 @@ func TestRestoreCapacity(t *testing.T) {
 				corev1.ResourceCPU:    resource.MustParse("1"),
 				corev1.ResourceMemory: resource.MustParse("1Gi"),
 			}),
-			containerName: "app1",
-			allowed:       true,
-			threshold:     1.0,
+			containerName:   "app1",
+			allowed:         true,
+			cpuThreshold:    1.0,
+			memoryThreshold: 1.0,
 		},
 		"empty requests": {
 			node: newNode("enough", corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("1"),
 				corev1.ResourceMemory: resource.MustParse("20Gi"),
 			}),
-			pod:         newPod("empty-req", corev1.ResourceList{}),
-			allowed:     true,
-			expectedErr: false,
-			threshold:   1.0,
+			pod:             newPod("empty-req", corev1.ResourceList{}),
+			allowed:         true,
+			expectedErr:     false,
+			cpuThreshold:    1.0,
+			memoryThreshold: 1.0,
 		},
 		"node with enough capacity": {
 			node: newNode("enough", corev1.ResourceList{
@@ -90,9 +93,10 @@ func TestRestoreCapacity(t *testing.T) {
 				corev1.ResourceCPU:    resource.MustParse("1"),
 				corev1.ResourceMemory: resource.MustParse("20Gi"),
 			}),
-			containerName: "app1",
-			allowed:       true,
-			threshold:     1.0,
+			containerName:   "app1",
+			allowed:         true,
+			cpuThreshold:    1.0,
+			memoryThreshold: 1.0,
 		},
 		"node at memory capacity": {
 			node: newNode("full-mem", corev1.ResourceList{
@@ -103,10 +107,11 @@ func TestRestoreCapacity(t *testing.T) {
 				corev1.ResourceCPU:    resource.MustParse("1"),
 				corev1.ResourceMemory: resource.MustParse("20Gi"),
 			}),
-			migration:     newMigration("10.0.0.1"),
-			containerName: "app1",
-			allowed:       false,
-			threshold:     1.0,
+			migration:       newMigration("10.0.0.1"),
+			containerName:   "app1",
+			allowed:         false,
+			cpuThreshold:    1.0,
+			memoryThreshold: 1.0,
 		},
 		"node at memory capacity because of low threshold": {
 			node: newNode("full-mem", corev1.ResourceList{
@@ -117,10 +122,11 @@ func TestRestoreCapacity(t *testing.T) {
 				corev1.ResourceCPU:    resource.MustParse("10m"),
 				corev1.ResourceMemory: resource.MustParse("4Gi"),
 			}),
-			migration:     newMigration("10.0.0.1"),
-			containerName: "app1",
-			allowed:       false,
-			threshold:     0.1,
+			migration:       newMigration("10.0.0.1"),
+			containerName:   "app1",
+			allowed:         false,
+			cpuThreshold:    1,
+			memoryThreshold: 0.1,
 		},
 		"node at cpu capacity because of low threshold": {
 			node: newNode("full-mem", corev1.ResourceList{
@@ -131,10 +137,11 @@ func TestRestoreCapacity(t *testing.T) {
 				corev1.ResourceCPU:    resource.MustParse("1"),
 				corev1.ResourceMemory: resource.MustParse("10Mi"),
 			}),
-			migration:     newMigration("10.0.0.1"),
-			containerName: "app1",
-			allowed:       false,
-			threshold:     0.1,
+			migration:       newMigration("10.0.0.1"),
+			containerName:   "app1",
+			allowed:         false,
+			cpuThreshold:    0.1,
+			memoryThreshold: 1.0,
 		},
 		"pod with resources in annotation": {
 			node: newNode("full-mem", corev1.ResourceList{
@@ -145,11 +152,12 @@ func TestRestoreCapacity(t *testing.T) {
 				corev1.ResourceCPU:    resource.MustParse("1"),
 				corev1.ResourceMemory: resource.MustParse("20Gi"),
 			}),
-			migration:     newMigration("10.0.0.1"),
-			containerName: "app1",
-			allowed:       false,
-			podScaledDown: true,
-			threshold:     1.0,
+			migration:       newMigration("10.0.0.1"),
+			containerName:   "app1",
+			allowed:         false,
+			podScaledDown:   true,
+			cpuThreshold:    1.0,
+			memoryThreshold: 1.0,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -164,7 +172,12 @@ func TestRestoreCapacity(t *testing.T) {
 				objs = append(objs, tc.migration)
 			}
 			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
-			cap := capacity.NewNodeTracker(prometheus.NewRegistry(), "name", tc.threshold)
+			cap := capacity.NewNodeTracker(
+				prometheus.NewRegistry(),
+				"name",
+				capacity.CPUThreshold(tc.cpuThreshold),
+				capacity.MemoryThreshold(tc.memoryThreshold),
+			)
 			for name, q := range tc.node.Status.Capacity {
 				cap.SetCapacity(name, q)
 			}

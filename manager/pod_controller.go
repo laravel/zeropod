@@ -347,10 +347,7 @@ func (r podReconciler) updateNodeResources(ctx context.Context) (time.Duration, 
 			memRequested.Add(*pod.Spec.Resources.Requests.Memory())
 			cpuRequested.Add(*pod.Spec.Resources.Requests.Cpu())
 		}
-		for _, container := range pod.Status.ContainerStatuses {
-			if container.Resources == nil {
-				continue
-			}
+		for _, container := range pod.Spec.Containers {
 			memRequested.Add(*container.Resources.Requests.Memory())
 			cpuRequested.Add(*container.Resources.Requests.Cpu())
 		}
