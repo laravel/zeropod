@@ -687,11 +687,12 @@ func loadTLSCA(ctx context.Context, client kubernetes.Interface) error {
 	namespace := "zeropod-system"
 	secret, err := client.CoreV1().Secrets(namespace).Get(ctx, caSecretName, metav1.GetOptions{})
 	if err != nil {
-		if kerrors.IsNotFound(err) {
-			secret, err = generateTLSCA(ctx, client, namespace)
-			if err != nil {
-				return err
-			}
+		if !kerrors.IsNotFound(err) {
+			return err
+		}
+		secret, err = generateTLSCA(ctx, client, namespace)
+		if err != nil {
+			return err
 		}
 	}
 	if err := os.WriteFile("/tls/ca.crt", secret.Data[corev1.TLSCertKey], 0600); err != nil {
