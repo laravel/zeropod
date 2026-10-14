@@ -45,6 +45,7 @@ func TestE2E(t *testing.T) {
 		waitScaledDown   bool
 		expectRunning    bool
 		expectScaledDown bool
+		expectRequestErr bool
 	}{
 		// note: some of these max request durations are really
 		// system-dependent. It has been tested on a few systems so far and
@@ -138,6 +139,28 @@ func TestE2E(t *testing.T) {
 			sequentialReqs: 1,
 			maxReqDuration: time.Second,
 		},
+		"not configured port does not wake container": {
+			pod: testPod(
+				defaultScaleDownAfter,
+				addContainer(
+					"agn", agnHostImage,
+					[]string{"sh"},
+					[]string{
+						"-c",
+						"/agnhost netexec --http-port=8080 --udp-port=-1 & /agnhost netexec --http-port=8081 --udp-port=-1",
+					},
+					8080, 8081,
+				),
+				portsAnnotation("agn=8080"),
+			),
+			// target the port that is not configured for restoring
+			svc:              testService(8081),
+			parallelReqs:     1,
+			sequentialReqs:   1,
+			maxReqDuration:   time.Second,
+			waitScaledDown:   true,
+			expectRequestErr: true,
+		},
 		"parallel requests": {
 			pod:            testPod(defaultScaleDownAfter),
 			parallelReqs:   10,
@@ -156,7 +179,7 @@ func TestE2E(t *testing.T) {
 		"pod with HTTP probe": {
 			pod: testPod(
 				scaleDownAfter(time.Second),
-				addContainer("nginx", "nginx", nil, 80),
+				addContainer("nginx", "nginx", nil, nil, 80),
 				livenessProbe(&corev1.Probe{
 					InitialDelaySeconds: 5,
 					PeriodSeconds:       1,
@@ -176,7 +199,7 @@ func TestE2E(t *testing.T) {
 		"pod with TCP probe": {
 			pod: testPod(
 				scaleDownAfter(time.Second),
-				addContainer("nginx", "nginx", nil, 80),
+				addContainer("nginx", "nginx", nil, nil, 80),
 				livenessProbe(&corev1.Probe{
 					InitialDelaySeconds: 5,
 					PeriodSeconds:       1,
@@ -197,7 +220,7 @@ func TestE2E(t *testing.T) {
 			pod: testPod(
 				scaleDownAfter(time.Second),
 				annotations(map[string]string{v1.ProbeBufferSizeAnnotationKey: "2048"}),
-				addContainer("nginx", "nginx", nil, 80),
+				addContainer("nginx", "nginx", nil, nil, 80),
 				livenessProbe(&corev1.Probe{
 					InitialDelaySeconds: 3,
 					PeriodSeconds:       1,
@@ -232,7 +255,9 @@ func TestE2E(t *testing.T) {
 			cleanupService := createServiceAndWait(t, ctx, e2e.client, tc.svc, 1)
 			defer cleanupPod()
 			defer cleanupService()
-			probeHTTP(t, e2e.url())
+			if !tc.expectRequestErr {
+				probeHTTP(t, e2e.url())
+			}
 
 			if tc.waitScaledDown {
 				waitUntilScaledDown(t, ctx, e2e.client, tc.pod)
@@ -258,7 +283,13 @@ func TestE2E(t *testing.T) {
 						before := time.Now()
 						resp, err := c.Get(e2e.url())
 						if err != nil {
+							if tc.expectRequestErr {
+								continue
+							}
 							t.Error(err)
+							return
+						} else if tc.expectRequestErr {
+							t.Errorf("expected request error, got %s: %d", resp.Status, resp.StatusCode)
 							return
 						}
 						t.Logf("request took %s", time.Since(before))

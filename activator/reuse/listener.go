@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"slices"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -182,6 +183,9 @@ func (act *Activator) registerListeners(pid int) error {
 	act.log.Debugf("getting listeners in %s", time.Since(before))
 
 	for _, l := range listeners {
+		if !slices.Contains(act.ports, l.Port) {
+			continue
+		}
 		if l.FD == nil {
 			continue
 		}
