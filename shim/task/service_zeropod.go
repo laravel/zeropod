@@ -454,11 +454,13 @@ func (w *wrapper) preventExit(cp containerProcess) bool {
 			return true
 		}
 
-		// we need to set the original process as being exited so we can exit cleanly
-		if zeropodContainer.InitialProcess() != nil &&
-			cp.Process.ID() == zeropodContainer.InitialProcess().ID() ||
-			cp.Process.ID() == zeropodContainer.Process().ID() {
-			zeropodContainer.InitialProcess().SetExited(0)
+		// A process can exit before Register initializes these references,
+		// including when Start fails. Let the task service handle that exit.
+		initial := zeropodContainer.InitialProcess()
+		current := zeropodContainer.Process()
+		if initial != nil && (cp.Process.ID() == initial.ID() ||
+			(current != nil && cp.Process.ID() == current.ID())) {
+			initial.SetExited(0)
 		}
 	}
 
