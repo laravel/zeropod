@@ -36,6 +36,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	nodev1 "k8s.io/api/node/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -618,8 +619,8 @@ func createDeployAndWait(t testing.TB, ctx context.Context, c client.Client, dep
 	return func() {
 		assert.NoError(t, c.Delete(ctx, deploy))
 		require.Eventually(t, func() bool {
-			if err := c.Get(ctx, objectName(deploy), deploy); err != nil {
-				return true
+			if err := c.Get(ctx, objectName(deploy), deploy); !apierrors.IsNotFound(err) {
+				return false
 			}
 			podList := &corev1.PodList{}
 			if err := c.List(ctx, podList, client.MatchingLabels(deploy.Spec.Selector.MatchLabels)); err != nil {
