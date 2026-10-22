@@ -177,7 +177,7 @@ func TestActivator(t *testing.T) {
 				require.NoError(t, SetKubeletAddr(os.Getpid(), *tc.kubeletAddr))
 			}
 
-			port, err := freePort()
+			port, err := FreePort()
 			require.NoError(t, err)
 			startServer(t, ctx, s, uint16(port), &tc)
 			for i := 0; i < tc.parallelReqs; i++ {

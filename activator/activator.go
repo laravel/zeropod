@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"net/netip"
 	"os"
@@ -641,22 +642,23 @@ func cp(done chan struct{}, errors chan error, dst io.Writer, src io.Reader) {
 	}
 }
 
-func freePort() (int, error) {
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		return 0, err
+func FreePort() (int, error) {
+	// pick a port below the default ephemeral port range (32768-60999) so a
+	// later bind to port 0 can't be handed the same port.
+	const start, end = 10000, 32768
+	for range 100 {
+		port := start + rand.IntN(end-start)
+		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			continue
+		}
+		if err := listener.Close(); err != nil {
+			return 0, err
+		}
+		return port, nil
 	}
 
-	addr, ok := listener.Addr().(*net.TCPAddr)
-	if !ok {
-		return 0, fmt.Errorf("addr is not a net.TCPAddr: %T", listener.Addr())
-	}
-
-	if err := listener.Close(); err != nil {
-		return 0, err
-	}
-
-	return addr.Port, nil
+	return 0, errors.New("unable to find free port")
 }
 
 func (s *Server) SetKubeletAddr(addr *netip.Addr) {
