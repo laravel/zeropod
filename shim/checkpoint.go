@@ -52,7 +52,6 @@ func (c *Container) kill(ctx context.Context) error {
 	c.CheckpointRestore.Lock()
 	defer c.CheckpointRestore.Unlock()
 	log.G(ctx).Infof("checkpointing is disabled, scaling down by killing")
-	c.AddCheckpointedPID(c.Pid())
 
 	// we access the initProcess so we can force delete
 	initProcess, ok := c.process.(*process.Init)
@@ -108,7 +107,6 @@ func (c *Container) checkpoint(ctx context.Context) error {
 	}
 
 	resetOnErr := func() {
-		c.DeleteCheckpointedPID(c.Pid())
 		_ = c.activator.DisableRedirects()
 		lines := printCriuLogs(ctx, filepath.Join(workDir, "dump.log"))
 		c.sendFailEvent(v1.ContainerPhase_CHECKPOINT_FAILED, lines)
@@ -123,7 +121,10 @@ func (c *Container) checkpoint(ctx context.Context) error {
 		opts.ImagePath = nodev1.PreDumpDir(c.ID())
 
 		beforePreDump := time.Now()
-		if err := initProcess.Runtime().Checkpoint(ctx, c.ID(), opts, runcC.PreDump); err != nil {
+		preDumpCtx, preDumpCancel := context.WithTimeout(ctx, time.Duration(c.cfg.CheckpointRestoreTimeout))
+		err := initProcess.Runtime().Checkpoint(preDumpCtx, c.ID(), opts, runcC.PreDump)
+		preDumpCancel()
+		if err != nil {
 			log.G(ctx).Errorf("error pre-dumping container: %s", err)
 			resetOnErr()
 			return err
@@ -137,12 +138,15 @@ func (c *Container) checkpoint(ctx context.Context) error {
 		opts.ParentPath = nodev1.RelativePreDumpDir()
 	}
 
-	c.AddCheckpointedPID(c.Pid())
 	// ImagePath is always the same, regardless of pre-dump
 	opts.ImagePath = snapshotDir
 
 	beforeCheckpoint := time.Now()
-	if err := initProcess.Runtime().Checkpoint(ctx, c.ID(), opts); err != nil {
+	if err := func() error {
+		runcCtx, runcCancel := context.WithTimeout(ctx, time.Duration(c.cfg.CheckpointRestoreTimeout))
+		defer runcCancel()
+		return initProcess.Runtime().Checkpoint(runcCtx, c.ID(), opts)
+	}(); err != nil {
 		log.G(ctx).Errorf("error checkpointing container: %s", err)
 		resetOnErr()
 		return err

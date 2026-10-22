@@ -161,7 +161,7 @@ func TestReuseActivator(t *testing.T) {
 	wg := sync.WaitGroup{}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
-			port, err := freePort()
+			port, err := activator.FreePort()
 			require.NoError(t, err)
 			require.NoError(t, log.SetLevel(log.DebugLevel.String()))
 			ctx, cancel := context.WithCancel(t.Context())
@@ -315,24 +315,6 @@ func runApp(t *testing.T, port int, networks ...activator.Network) (*exec.Cmd, e
 	<-ready
 	t.Logf("using pid %d", cmd.Process.Pid)
 	return cmd, nil
-}
-
-func freePort() (int, error) {
-	listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		return 0, err
-	}
-
-	addr, ok := listener.Addr().(*net.TCPAddr)
-	if !ok {
-		return 0, fmt.Errorf("addr is not a net.TCPAddr: %T", listener.Addr())
-	}
-
-	if err := listener.Close(); err != nil {
-		return 0, err
-	}
-
-	return addr.Port, nil
 }
 
 func listenAndServe(t *testing.T) {

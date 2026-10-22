@@ -39,6 +39,6 @@ func (c *Container) updateCheckpointMemoryBytes() error {
 	if err != nil {
 		return nil
 	}
-	c.metrics.CheckpointMemoryBytes = dumpStats.GetPagesWritten() * uint64(unix.Getpagesize())
+	c.metrics.CheckpointMemoryBytes = (dumpStats.GetPagesWritten() + dumpStats.GetShpagesWritten()) * uint64(unix.Getpagesize())
 	return nil
 }

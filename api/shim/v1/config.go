@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,11 +53,12 @@ const (
 	// DefaultProbeBufferSize should be able to fit kube-probe HTTP requests with
 	// reasonable path and header sizes but should still be small enough to not
 	// impact performance.
-	DefaultProbeBufferSize        = 1024
-	DefaultProbeBinaryName        = "kubelet"
-	DefaultTrackerIgnoreLocalhost = true
-	DefaultCapacityRequest        = false
-	DefaultReuseportActivator     = false
+	DefaultProbeBufferSize          = 1024
+	DefaultProbeBinaryName          = "kubelet"
+	DefaultTrackerIgnoreLocalhost   = true
+	DefaultCapacityRequest          = false
+	DefaultReuseportActivator       = false
+	DefaultCheckpointRestoreTimeout = Duration(time.Minute)
 )
 
 var ContainerdAnnotations = []string{
@@ -104,7 +106,37 @@ type Config struct {
 	CapacityRequest        bool   `json:"capacityRequest"`
 	ProbeAddress           string `json:"probeAddress"`
 	ReuseportActivator     bool   `json:"reuseportActivator"`
-	AnnotationConfig       `json:"-"`
+	// CheckpointRestoreTimeout limits runc checkpoint and restore call
+	// duration.
+	CheckpointRestoreTimeout Duration `json:"checkpointRestoreTimeout"`
+	AnnotationConfig         `json:"-"`
+}
+
+type Duration time.Duration
+
+func (d Duration) MarshalJSON() ([]byte, error) {
+	return json.Marshal(time.Duration(d).String())
+}
+
+func (d *Duration) UnmarshalJSON(b []byte) error {
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	switch value := v.(type) {
+	case float64:
+		*d = Duration(time.Duration(value))
+		return nil
+	case string:
+		tmp, err := time.ParseDuration(value)
+		if err != nil {
+			return err
+		}
+		*d = Duration(tmp)
+		return nil
+	default:
+		return errors.New("invalid duration")
+	}
 }
 
 // NewConfig uses the annotations from the container spec to create a new
@@ -254,9 +286,10 @@ func NewConfig(ctx context.Context, spec *specs.Spec) (*Config, error) {
 		}
 	}
 	cfg := &Config{
-		TrackerIgnoreLocalhost: DefaultTrackerIgnoreLocalhost,
-		CapacityRequest:        DefaultCapacityRequest,
-		ReuseportActivator:     DefaultReuseportActivator,
+		TrackerIgnoreLocalhost:   DefaultTrackerIgnoreLocalhost,
+		CapacityRequest:          DefaultCapacityRequest,
+		ReuseportActivator:       DefaultReuseportActivator,
+		CheckpointRestoreTimeout: DefaultCheckpointRestoreTimeout,
 	}
 	path, err := relativeConfigFile()
 	if err != nil {

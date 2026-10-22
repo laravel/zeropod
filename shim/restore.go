@@ -125,7 +125,9 @@ func (c *Container) restore(ctx context.Context) (*runc.Container, process.Proce
 	}
 	log.G(ctx).Info("restore: process created")
 
-	if err := p.Start(ctx); err != nil {
+	startCtx, startCancel := context.WithTimeout(ctx, time.Duration(c.cfg.CheckpointRestoreTimeout))
+	defer startCancel()
+	if err := p.Start(startCtx); err != nil {
 		lines := printCriuLogs(ctx, filepath.Join(container.Bundle, "work", "restore.log"))
 		c.sendFailEvent(v1.ContainerPhase_RESTORE_FAILED, lines)
 		return nil, nil, fmt.Errorf("start failed during restore: %w", err)

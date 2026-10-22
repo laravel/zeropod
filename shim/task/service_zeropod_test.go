@@ -1,6 +1,7 @@
 package task
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/containerd/containerd/v2/cmd/containerd-shim-runc-v2/process"
@@ -16,7 +17,9 @@ func TestPreventExitBeforeRegistration(t *testing.T) {
 		zeropodContainers: map[string]*zshim.Container{
 			// Create publishes the Zeropod container before Start calls Register.
 			// Its process references are still nil when an early exit arrives.
-			container.ID: {},
+			container.ID: {
+				CheckpointRestore: &sync.Mutex{},
+			},
 		},
 	}
 

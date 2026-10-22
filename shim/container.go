@@ -65,8 +65,6 @@ type Container struct {
 	preRestore       func() HandleStartedFunc
 	postRestore      func(*runc.Container, HandleStartedFunc)
 	events           chan *v1.ContainerStatus
-	checkpointedPIDs map[int]struct{}
-	pidsMu           sync.Mutex
 	evacuation       sync.Once
 	metrics          *v1.ContainerMetrics
 	runcVersion      string
@@ -106,7 +104,6 @@ func New(ctx context.Context, cfg *v1.Config, r *taskAPI.CreateTaskRequest, pt s
 		netNS:             targetNS,
 		CheckpointRestore: &sync.Mutex{},
 		events:            events,
-		checkpointedPIDs:  map[int]struct{}{},
 		metrics:           newMetrics(cfg, true),
 		runcVersion:       vers.Runc,
 	}
@@ -373,28 +370,6 @@ func (c *Container) StopActivator(ctx context.Context) {
 	if c.activator != nil {
 		c.activator.Stop(ctx)
 	}
-}
-
-// CheckpointedPID indicates if the pid has been checkpointed before.
-func (c *Container) CheckpointedPID(pid int) bool {
-	c.pidsMu.Lock()
-	defer c.pidsMu.Unlock()
-	_, ok := c.checkpointedPIDs[pid]
-	return ok
-}
-
-// AddCheckpointedPID registers a new pid that should be considered checkpointed.
-func (c *Container) AddCheckpointedPID(pid int) {
-	c.pidsMu.Lock()
-	defer c.pidsMu.Unlock()
-	c.checkpointedPIDs[pid] = struct{}{}
-}
-
-// DeleteCheckpointedPID deletes a pid from the map of checkpointed pids.
-func (c *Container) DeleteCheckpointedPID(pid int) {
-	c.pidsMu.Lock()
-	defer c.pidsMu.Unlock()
-	delete(c.checkpointedPIDs, pid)
 }
 
 func (c *Container) Stop(ctx context.Context) {

@@ -82,7 +82,7 @@ func TestMigration(t *testing.T) {
 			afterMigration: nonLiveAfterMigration,
 		},
 		"non-live migration fails when running": {
-			deploy:                freezerDeployment("cross-node-migration", "default", 1, migrateAnnotation("freezer"), scaleDownAfter(time.Hour)),
+			deploy:                freezerDeployment("non-live-migration-running", "default", 1, migrateAnnotation("freezer"), scaleDownAfter(time.Hour)),
 			svc:                   testService(8080),
 			sameNode:              false,
 			liveMigration:         false,
