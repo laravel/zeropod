@@ -600,6 +600,7 @@ func (c *Container) restoreHandler(ctx context.Context) activator.RestoreHook {
 			c.Process().SetExited(1)
 			c.InitialProcess().SetExited(1)
 			log.G(ctx).Errorf("error restoring container, exiting process: %s", err)
+			return 0, err
 		}
 		c.Container = restoredContainer
 		c.ScheduleScaleDown()
