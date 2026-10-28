@@ -149,7 +149,7 @@ func (act *Activator) LoadBPF() error {
 		act.trackerLink = trackerLink
 		// when we ignore localhost completely, there's no point in
 		// attaching the tracker to loopback.
-		if act.trackerIgnoreLocalhost {
+		if !act.trackerIgnoreLocalhost && trackerInterface != activator.IfaceLoopback {
 			trackerLinkLo, err := attachFunc(activator.IfaceLoopback)
 			if err != nil {
 				return err
