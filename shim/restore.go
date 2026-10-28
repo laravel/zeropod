@@ -19,6 +19,7 @@ import (
 	cioutil "github.com/containerd/containerd/v2/pkg/ioutil"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/containerd/v2/pkg/stdio"
+	runcC "github.com/containerd/go-runc"
 	"github.com/containerd/log"
 	"github.com/containerd/ttrpc"
 	"github.com/containernetworking/plugins/pkg/ns"
@@ -26,6 +27,7 @@ import (
 	nodev1 "github.com/laravel/zeropod/api/node/v1"
 	v1 "github.com/laravel/zeropod/api/shim/v1"
 	crio "github.com/laravel/zeropod/shim/io"
+	"golang.org/x/sys/unix"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -128,6 +130,7 @@ func (c *Container) restore(ctx context.Context) (*runc.Container, process.Proce
 	startCtx, startCancel := context.WithTimeout(ctx, time.Duration(c.cfg.CheckpointRestoreTimeout))
 	defer startCancel()
 	if err := p.Start(startCtx); err != nil {
+		c.cleanupFailedStart(ctx, p)
 		lines := printCriuLogs(ctx, filepath.Join(container.Bundle, "work", "restore.log"))
 		c.sendFailEvent(v1.ContainerPhase_RESTORE_FAILED, lines)
 		return nil, nil, fmt.Errorf("start failed during restore: %w", err)
@@ -155,6 +158,28 @@ func (c *Container) restore(ctx context.Context) (*runc.Container, process.Proce
 	}
 
 	return container, p, nil
+}
+
+// cleanupFailedStart cleans up after runc got killed during restore (e.g.
+// timeout or OOM). runc bind mounts the rootfs to criu-root in its state dir
+// and can't unmount it when killed. This leaks the mount and makes runc delete
+// fail to remove the state dir (while still succeeding with --force), so the
+// next runc create with the same ID fails. We don't use p.Delete as that also
+// unmounts the rootfs.
+func (c *Container) cleanupFailedStart(ctx context.Context, p process.Process) {
+	initProc, ok := p.(*process.Init)
+	if !ok {
+		return
+	}
+	criuRoot := filepath.Join(initProc.Runtime().Root, c.ID(), "criu-root")
+	if err := unix.Unmount(criuRoot, unix.MNT_DETACH); err != nil && !errors.Is(err, unix.EINVAL) && !errors.Is(err, unix.ENOENT) {
+		log.G(ctx).WithError(err).Warn("unmounting criu root after failed start")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := initProc.Runtime().Delete(ctx, c.ID(), &runcC.DeleteOpts{Force: true}); err != nil {
+		log.G(ctx).WithError(err).Warn("deleting runc container after failed start")
+	}
 }
 
 // restoreLoggers creates the appropriate fifos and pipes the logs to the
