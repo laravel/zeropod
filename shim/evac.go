@@ -335,6 +335,12 @@ func (c *Container) handleDrainCheck(in time.Duration, timeout time.Duration) {
 		c.ExitOK(c.context)
 		return
 	}
+	lastConnect := c.activator.ForwardLastConnect()
+	if time.Since(lastConnect) < drainCheckInterval {
+		log.G(c.context).Infof("last forward connect was %s ago, delaying drain", time.Since(lastConnect))
+		c.checkConnectionDrainIn(in, timeout)
+		return
+	}
 	var last time.Time
 	var err error
 	for _, port := range c.cfg.Ports {

@@ -17,6 +17,7 @@ import (
 type forwarder struct {
 	targetAddr     string
 	connectTimeout time.Duration
+	lastConnect    time.Time
 	log            *log.Entry
 	ln             net.Listener
 	ns             ns.NetNS
@@ -51,10 +52,25 @@ func (act *Activator) ForwardToTarget(ctx context.Context, addr string) error {
 		if err := act.attachNetListener(fwd.ln, appKey, ln.reuse.Listeners, ln.reuse.SelectOrMigrate, nil); err != nil {
 			return fmt.Errorf("registering listener: %w", err)
 		}
-		act.listeners[k].forwarder = *fwd
+		act.listeners[k].forwarder = fwd
 		go fwd.serveForward(ctx, fwd.ln, k.port)
 	}
 	return nil
+}
+
+func (act *Activator) ForwardLastConnect() time.Time {
+	act.mu.Lock()
+	defer act.mu.Unlock()
+	latest := time.Time{}
+	for _, ln := range act.listeners {
+		if ln.forwarder == nil {
+			continue
+		}
+		if !ln.forwarder.lastConnect.IsZero() {
+			latest = ln.forwarder.lastConnect
+		}
+	}
+	return latest
 }
 
 func (fwd *forwarder) close() {
@@ -123,7 +139,7 @@ func (fwd *forwarder) connect(ctx context.Context, port uint16, addr string) (ne
 	dialer := net.Dialer{
 		Timeout: fwd.connectTimeout,
 	}
-	targetAddr, err := net.ResolveTCPAddr("tcp", addr+":0")
+	targetAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(addr, "0"))
 	if err != nil {
 		return nil, fmt.Errorf("parsing target addr: %w", err)
 	}
@@ -144,6 +160,7 @@ func (fwd *forwarder) connect(ctx context.Context, port uint16, addr string) (ne
 			if time.Since(start) > fwd.connectTimeout {
 				return nil, fmt.Errorf("timeout dialing process")
 			}
+			fwd.lastConnect = time.Now()
 			if err := fwd.ns.Do(func(_ ns.NetNS) error {
 				var err error
 				backendConn, err = dialer.Dial("tcp", targetAddr.String())
@@ -156,7 +173,6 @@ func (fwd *forwarder) connect(ctx context.Context, port uint16, addr string) (ne
 				}
 				var operr *net.OpError
 				if errors.As(err, &operr) && operr.Temporary() {
-					fwd.log.Errorf("temporary operr: %s", operr)
 					continue
 				}
 				return nil, fmt.Errorf("unable to connect to process: %s", err)

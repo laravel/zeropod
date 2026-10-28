@@ -19,7 +19,7 @@ type listenerGroup struct {
 	wake      wakeListener
 	probe     probeListener
 	app       appListener
-	forwarder forwarder
+	forwarder *forwarder
 	reuse     *reuseportObjects
 }
 

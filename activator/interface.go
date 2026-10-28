@@ -17,4 +17,5 @@ type Activator interface {
 	Stop(ctx context.Context)
 	GetListeners(ctx context.Context, pid int) []Listener
 	ForwardToTarget(ctx context.Context, addr string) error
+	ForwardLastConnect() time.Time
 }

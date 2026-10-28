@@ -54,6 +54,7 @@ func (c *Container) Restore(ctx context.Context) (*runc.Container, process.Proce
 		log.G(ctx).WithError(err).Error("requesting restore capacity")
 	} else if !resp.Allowed {
 		if resp.RedirectAddr != "" {
+			c.activator.SetConnectTimeout(time.Duration(c.cfg.ForwardConnectTimeout))
 			if err := c.activator.ForwardToTarget(ctx, resp.RedirectAddr); err != nil {
 				return nil, nil, err
 			}

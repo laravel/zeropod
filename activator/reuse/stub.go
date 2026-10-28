@@ -11,5 +11,3 @@ func (act *Activator) AttachExec() error {
 }
 
 func (act *Activator) SetProxyTimeout(d time.Duration) {}
-
-func (act *Activator) SetConnectTimeout(d time.Duration) {}

@@ -46,6 +46,7 @@ type Server struct {
 	peekBufferSize  int
 	lastAddr        string
 	forwardToTarget bool
+	forwardLastConn time.Time
 	targetAddr      string
 	kubeletAddr     *netip.Addr
 	lns             Listeners
@@ -202,14 +203,17 @@ func (s *Server) SetPeekBufferSize(size int) {
 }
 
 // ForwardToTarget instructs the activator to forward any incoming traffic to
-// the specified address. The connHook and restoreHook will both be disabled.
+// the specified address. The restoreHook will be disabled.
 func (s *Server) ForwardToTarget(_ context.Context, addr string) error {
-	// disable hooks
-	s.connHook = func(c net.Conn) (net.Conn, bool, error) { return c, true, nil }
+	// disable restore hook, we still want to intercept probes
 	s.restoreHook = func() (int, error) { return 0, nil }
 	s.targetAddr = addr
 	s.forwardToTarget = true
 	return nil
+}
+
+func (s *Server) ForwardLastConnect() time.Time {
+	return s.forwardLastConn
 }
 
 func (s *Server) listen(ctx context.Context, port uint16) (int, error) {
@@ -363,7 +367,7 @@ func (s *Server) connect(ctx context.Context, port uint16, remoteAddr *net.TCPAd
 		Timeout: s.connectTimeout,
 	}
 	if s.forwardToTarget {
-		targetAddr, err := net.ResolveTCPAddr("tcp", s.targetAddr+":0")
+		targetAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(s.targetAddr, "0"))
 		if err != nil {
 			return nil, fmt.Errorf("parsing target addr: %w", err)
 		}
@@ -394,6 +398,9 @@ func (s *Server) connect(ctx context.Context, port uint16, remoteAddr *net.TCPAd
 			if time.Since(start) > s.connectTimeout {
 				return nil, fmt.Errorf("timeout dialing process")
 			}
+			if s.forwardToTarget {
+				s.forwardLastConn = time.Now()
+			}
 			if err := s.ns.Do(func(_ ns.NetNS) error {
 				var err error
 				backendConn, err = dialer.Dial("tcp", backendAddr.String())
@@ -406,7 +413,6 @@ func (s *Server) connect(ctx context.Context, port uint16, remoteAddr *net.TCPAd
 				}
 				var operr *net.OpError
 				if errors.As(err, &operr) && operr.Temporary() {
-					log.G(ctx).Errorf("temporary operr: %s", operr)
 					continue
 				}
 				return nil, fmt.Errorf("unable to connect to process: %s", err)
