@@ -37,6 +37,7 @@ type testCase struct {
 	kubeletAddr            *netip.Addr
 	networks               []activator.Network
 	forwardToFunc          func(t *testing.T, port int) (string, *httptest.Server)
+	expectMissingPort      bool
 }
 
 func TestReuseActivator(t *testing.T) {
@@ -157,6 +158,10 @@ func TestReuseActivator(t *testing.T) {
 			expectLastActivity: true,
 			networks:           []activator.Network{activator.NetworkTCPAny},
 		},
+		"missing port": {
+			networks:          []activator.Network{activator.NetworkTCP4, activator.NetworkTCP6ONLY},
+			expectMissingPort: true,
+		},
 	}
 	wg := sync.WaitGroup{}
 	for name, tc := range tests {
@@ -196,6 +201,19 @@ func TestReuseActivator(t *testing.T) {
 			listeners := activator.Listeners{}
 			for _, net := range tc.networks {
 				listeners = append(listeners, activator.Listener{Port: uint16(port), Network: net})
+			}
+			if tc.expectMissingPort {
+				missingPort, err := activator.FreePort()
+				require.NoError(t, err)
+				listeners = append(listeners, activator.Listener{Port: uint16(missingPort), Network: activator.NetworkTCP4})
+				err = s.Start(ctx, os.Getpid(), listeners, false)
+				assert.ErrorIs(t, err, activator.ErrExpectedListeningSockets)
+				assert.False(t, s.Started())
+				cancel()
+				s.Stop(ctx)
+				assert.NoError(t, cmd.Process.Kill())
+				_ = cmd.Wait()
+				return
 			}
 			require.NoError(t, s.Start(ctx, os.Getpid(), listeners, true))
 			if tc.forwardToFunc != nil {
@@ -319,9 +337,8 @@ func runApp(t *testing.T, port int, networks ...activator.Network) (*exec.Cmd, e
 
 func listenAndServe(t *testing.T) {
 	wg := sync.WaitGroup{}
-	networks := strings.SplitSeq(os.Getenv("NETWORKS"), ",")
-	fd := uintptr(3)
-	for n := range networks {
+	listeners := []net.Listener{}
+	for n := range strings.SplitSeq(os.Getenv("NETWORKS"), ",") {
 		fmt.Printf("listening on %s\n", n)
 		ln, err := net.Listen(n, os.Getenv("ADDRESS"))
 		if err != nil {
@@ -329,13 +346,14 @@ func listenAndServe(t *testing.T) {
 		}
 		//nolint:errcheck
 		defer ln.Close()
-		pipe := os.NewFile(fd, "pipe")
-		if pipe != nil {
-			_, err := pipe.Write([]byte{1})
-			assert.NoError(t, err)
-			assert.NoError(t, pipe.Close())
-		}
-		fd++
+		listeners = append(listeners, ln)
+	}
+	pipe := os.NewFile(3, "pipe")
+	_, err := pipe.Write([]byte{1})
+	assert.NoError(t, err)
+	assert.NoError(t, pipe.Close())
+
+	for _, ln := range listeners {
 		wg.Go(func() {
 			assert.NoError(t, http.Serve(ln, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, err := fmt.Fprint(w, os.Getenv("RESPONSE"))

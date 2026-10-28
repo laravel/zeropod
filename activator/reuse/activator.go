@@ -254,7 +254,6 @@ func (act *Activator) Start(ctx context.Context, pid int, listeners activator.Li
 	} else {
 		before := time.Now()
 		if err := act.registerListeners(pid); err != nil {
-			act.log.WithError(err).Error("registering listeners")
 			return err
 		}
 		act.log.Debugf("registered listeners in %s", time.Since(before))
