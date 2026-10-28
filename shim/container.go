@@ -483,10 +483,12 @@ func (c *Container) initActivator(ctx context.Context) error {
 
 	log.G(ctx).Infof("starting activator with ports: %v", c.cfg.Ports)
 	if err := c.startActivator(ctx, c.cfg.Ports...); err != nil {
-		if errors.Is(err, activator.ErrMapNotFound) || errors.Is(err, activator.ErrNoListeningSockets) {
+		if errors.Is(err, activator.ErrMapNotFound) || errors.Is(err, activator.ErrExpectedListeningSockets) {
+			log.G(ctx).Warn(err)
 			c.retryInitIn(c.initRetry())
 			return nil
 		}
+		log.G(ctx).WithError(err).Error("failed to start activator")
 		return err
 	}
 	return nil
@@ -576,7 +578,6 @@ func (c *Container) startActivator(ctx context.Context, ports ...uint16) error {
 			return err
 		}
 
-		log.G(ctx).WithError(err).Error("failed to start activator")
 		return err
 	}
 	log.G(ctx).Printf("activator started")

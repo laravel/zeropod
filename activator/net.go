@@ -36,6 +36,14 @@ type Listener struct {
 
 type Listeners []Listener
 
+func (lns Listeners) String() string {
+	parts := make([]string, 0, len(lns))
+	for _, ln := range lns {
+		parts = append(parts, fmt.Sprintf("%d/%s", ln.Port, ln.Network))
+	}
+	return strings.Join(parts, ", ")
+}
+
 func (lns Listeners) Ports() []uint16 {
 	ports := map[uint16]struct{}{}
 	for _, ln := range lns {
@@ -48,7 +56,7 @@ func (ln Listener) OwnsFD() bool {
 	return ln.ownsFD
 }
 
-var ErrNoListeningSockets = errors.New("no listening sockets found")
+var ErrExpectedListeningSockets = errors.New("expected listening sockets not found")
 
 // GetListenersOfPID gets all [Listeners] in the pid namespace.
 func GetListenersOfPID(ctx context.Context, pid int, ignoredInodes ...uint64) (Listeners, error) {
@@ -178,7 +186,7 @@ func getListenersOfPID(ctx context.Context, pid int, closeFD bool, ignoredInodes
 	}
 
 	if len(listeners) == 0 {
-		return nil, ErrNoListeningSockets
+		return nil, fmt.Errorf("%w: no sockets found", ErrExpectedListeningSockets)
 	}
 	return listeners, nil
 }

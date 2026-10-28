@@ -177,8 +177,13 @@ func (act *Activator) registerListeners(pid int) error {
 	if err != nil {
 		return err
 	}
-	if len(listeners) < len(act.ports) {
-		return fmt.Errorf("%w: expected at least %d listeners, found %d", activator.ErrNoListeningSockets, len(act.ports), len(listeners))
+	if !act.containsAllPorts(listeners) {
+		for _, ln := range listeners {
+			if ln.FD != nil {
+				_ = ln.FD.Close()
+			}
+		}
+		return fmt.Errorf("%w: not all ports %v in listeners: %s", activator.ErrExpectedListeningSockets, act.ports, listeners)
 	}
 	act.log.Debugf("getting listeners in %s", time.Since(before))
 
@@ -216,9 +221,20 @@ func (act *Activator) registerListeners(pid int) error {
 		act.listeners[key].app = appListener{fd: l.OrigFd, uid: l.UID}
 	}
 	if len(listeners) == 0 {
-		return activator.ErrNoListeningSockets
+		return fmt.Errorf("%w: no sockets found", activator.ErrExpectedListeningSockets)
 	}
 	return nil
+}
+
+func (act *Activator) containsAllPorts(listeners activator.Listeners) bool {
+	for _, port := range act.ports {
+		if !slices.ContainsFunc(listeners, func(ln activator.Listener) bool {
+			return ln.Port == port && ln.FD != nil
+		}) {
+			return false
+		}
+	}
+	return true
 }
 
 func (act *Activator) probeAddrValue() [16]byte {
