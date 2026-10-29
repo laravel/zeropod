@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/checkpoint-restore/go-criu/v8/stats"
@@ -213,6 +214,50 @@ type nodeService struct {
 	liveMigrationSupported bool
 	timeouts               Timeouts
 	cap                    capacity.Tracker
+	evicted                evictedPods
+}
+
+// evictedPods keeps track of pods that have been evicted by this node. This is
+// needed as the pod in the client cache might not reflect the deletion yet.
+type evictedPods struct {
+	mu   sync.Mutex
+	pods map[types.UID]time.Time
+}
+
+// add marks the pod as evicted and returns true if it was not already being
+// evicted. Pods that already have a deletion timestamp are not stored as the
+// cache has caught up. Entries older than ttl are pruned.
+func (e *evictedPods) add(pod *corev1.Pod, ttl time.Duration) bool {
+	if !pod.DeletionTimestamp.IsZero() {
+		return false
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.pods == nil {
+		e.pods = map[types.UID]time.Time{}
+	}
+	for id, evictedAt := range e.pods {
+		if time.Since(evictedAt) > ttl {
+			delete(e.pods, id)
+		}
+	}
+	if _, ok := e.pods[pod.UID]; ok {
+		return false
+	}
+	e.pods[pod.UID] = time.Now()
+	return true
+}
+
+// contains returns true if the pod is being deleted or has been evicted
+// within ttl.
+func (e *evictedPods) contains(pod *corev1.Pod, ttl time.Duration) bool {
+	if !pod.DeletionTimestamp.IsZero() {
+		return true
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	evictedAt, ok := e.pods[pod.UID]
+	return ok && time.Since(evictedAt) <= ttl
 }
 
 var findMigrationBackoff = wait.Backoff{
@@ -237,6 +282,10 @@ func (ns *nodeService) RestoreCapacity(ctx context.Context, req *nodev1.RestoreC
 	if err := ns.kube.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
 		return nil, err
 	}
+	if ns.evicted.contains(pod, ns.timeouts.EvictionTimeout) {
+		log.Info("pod is already being deleted, denying restore")
+		return ns.evictPod(ctx, req, pod)
+	}
 	res, err := getContainerResources(pod, req.PodInfo.ContainerName)
 	if err != nil {
 		if errors.Is(err, errEmptyRequests) {
@@ -259,12 +308,7 @@ func (ns *nodeService) RestoreCapacity(ctx context.Context, req *nodev1.RestoreC
 		)
 		return &nodev1.RestoreCapacityResponse{Allowed: true}, nil
 	}
-	resp, err := ns.evictPod(ctx, req, pod)
-	if err != nil {
-		log.Error("evicting pod", "error", err)
-		return &nodev1.RestoreCapacityResponse{Allowed: true}, fmt.Errorf("evicting pod: %w", err)
-	}
-	return resp, nil
+	return ns.evictPod(ctx, req, pod)
 }
 
 func (ns *nodeService) evictPod(ctx context.Context, req *nodev1.RestoreCapacityRequest, pod *corev1.Pod) (*nodev1.RestoreCapacityResponse, error) {
@@ -282,13 +326,14 @@ func (ns *nodeService) evictPod(ctx context.Context, req *nodev1.RestoreCapacity
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		log.Error("tainting node", "error", err)
+		return &nodev1.RestoreCapacityResponse{Allowed: true}, fmt.Errorf("evicting pod: tainting node: %w", err)
 	}
-	firstEviction := pod.DeletionTimestamp.IsZero()
 	if err := ns.kube.Delete(ctx, pod); err != nil {
-		return nil, err
+		log.Error("deleting pod", "error", err)
+		return &nodev1.RestoreCapacityResponse{Allowed: true}, fmt.Errorf("evicting pod: %w", err)
 	}
-	if firstEviction {
+	if firstEviction := ns.evicted.add(pod, ns.timeouts.EvictionTimeout); firstEviction {
 		ns.cap.IncEvicted()
 	}
 	if !shimv1.AnyMigrationEnabled(pod.Annotations) {

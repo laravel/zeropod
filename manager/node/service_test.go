@@ -64,6 +64,7 @@ func TestRestoreCapacity(t *testing.T) {
 		allowed         bool
 		expectedErr     bool
 		podScaledDown   bool
+		podDeleting     bool
 	}{
 		"empty node": {
 			node: newNode("empty", nil),
@@ -162,6 +163,22 @@ func TestRestoreCapacity(t *testing.T) {
 			cpuThreshold:    1.0,
 			memoryThreshold: 1.0,
 		},
+		"pod already being evicted with enough capacity": {
+			node: newNode("enough", corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("20Gi"),
+			}),
+			pod: newPod("app1", corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("1Gi"),
+			}),
+			migration:       newMigration("10.0.0.1"),
+			containerName:   "app1",
+			allowed:         false,
+			podDeleting:     true,
+			cpuThreshold:    1.0,
+			memoryThreshold: 1.0,
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			scheme := runtime.NewScheme()
@@ -169,6 +186,10 @@ func TestRestoreCapacity(t *testing.T) {
 			assert.NoError(t, v1.AddToScheme(scheme))
 			if tc.podScaledDown {
 				assert.NoError(t, setScaledDown(tc.pod))
+			}
+			if tc.podDeleting {
+				tc.pod.DeletionTimestamp = new(metav1.Now())
+				tc.pod.Finalizers = []string{"test"}
 			}
 			objs := []client.Object{tc.node, tc.pod}
 			if tc.migration != nil {
@@ -210,6 +231,65 @@ func TestRestoreCapacity(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRestoreCapacityAlreadyEvicted(t *testing.T) {
+	scheme := runtime.NewScheme()
+	assert.NoError(t, corev1.AddToScheme(scheme))
+	assert.NoError(t, v1.AddToScheme(scheme))
+	node := newNode("node", corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("4"),
+		corev1.ResourceMemory: resource.MustParse("1Gi"),
+	})
+	pod := newPod("app1", corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("1"),
+		corev1.ResourceMemory: resource.MustParse("2Gi"),
+	})
+	pod.UID = "pod-uid"
+	newKube := func() client.Client {
+		return fake.NewClientBuilder().WithScheme(scheme).
+			WithObjects(node.DeepCopy(), pod.DeepCopy(), newMigration("10.0.0.1")).Build()
+	}
+	reg := prometheus.NewRegistry()
+	cap := capacity.NewNodeTracker(reg, "name", capacity.CPUThreshold(1.0), capacity.MemoryThreshold(1.0))
+	for name, q := range node.Status.Capacity {
+		cap.SetCapacity(name, q)
+	}
+	ns := &nodeService{
+		kube:     newKube(),
+		nodeName: node.Name,
+		log:      slog.Default(),
+		cap:      cap,
+		timeouts: Timeouts{EvictionTimeout: time.Minute},
+	}
+	req := &nodev1.RestoreCapacityRequest{
+		PodInfo: &nodev1.PodInfo{
+			Name:          pod.Name,
+			Namespace:     pod.Namespace,
+			ContainerName: "app1",
+		},
+	}
+	resp, err := ns.RestoreCapacity(t.Context(), req)
+	assert.NoError(t, err)
+	assert.False(t, resp.Allowed)
+
+	// simulate a stale cache that does not reflect the pod deletion yet and
+	// enough capacity for the pod to be restored.
+	ns.kube = newKube()
+	cap.SetCapacity(corev1.ResourceMemory, resource.MustParse("20Gi"))
+	resp, err = ns.RestoreCapacity(t.Context(), req)
+	assert.NoError(t, err)
+	assert.False(t, resp.Allowed)
+
+	mfs, err := reg.Gather()
+	assert.NoError(t, err)
+	evictions := 0.0
+	for _, mf := range mfs {
+		if mf.GetName() == "zeropod_"+capacity.MetricNodeEvictions {
+			evictions = mf.GetMetric()[0].GetCounter().GetValue()
+		}
+	}
+	assert.Equal(t, 1.0, evictions)
 }
 
 func TestRestore(t *testing.T) {
