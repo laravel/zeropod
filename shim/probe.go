@@ -6,7 +6,7 @@ import (
 	"context"
 	"io"
 	"net"
-	"net/http"
+	"net/textproto"
 	"strings"
 
 	"github.com/containerd/log"
@@ -74,9 +74,10 @@ func isTCPProbe(ctx context.Context, conn bufConn) bool {
 	return err == io.EOF
 }
 
-// isHTTPProbe detects an HTTP probe by constructing a [http.Request] from the
-// conn buffer. If it's a valid HTTP request, we simply read the user agent
-// string and assume it's a probe if it has the prefix "kube-probe/".
+// isHTTPProbe detects an HTTP probe by parsing the request line and headers
+// from the conn buffer. If it's a valid HTTP request, we simply read the user
+// agent string and assume it's a probe if it has the prefix "kube-probe/".
+// net/http is avoided on purpose as it adds a lot to the shim binary size.
 func isHTTPProbe(ctx context.Context, conn bufConn) bool {
 	if _, err := conn.Peek(1); err != nil {
 		return false
@@ -86,24 +87,29 @@ func isHTTPProbe(ctx context.Context, conn bufConn) bool {
 		log.G(ctx).WithError(err).Debug("peek")
 		return false
 	}
-	req, err := http.ReadRequest(bufio.NewReader(bytes.NewReader(b)))
+	tp := textproto.NewReader(bufio.NewReader(bytes.NewReader(b)))
+	line, err := tp.ReadLine()
 	if err != nil {
-		log.G(ctx).WithError(err).Debug("req")
+		log.G(ctx).WithError(err).Debug("reading request line")
 		return false
 	}
-	return strings.HasPrefix(req.Header.Get("User-Agent"), "kube-probe/")
+	if parts := strings.Fields(line); len(parts) != 3 || !strings.HasPrefix(parts[2], "HTTP/") {
+		return false
+	}
+	header, err := tp.ReadMIMEHeader()
+	if err != nil {
+		log.G(ctx).WithError(err).Debug("reading request header")
+		return false
+	}
+	return strings.HasPrefix(header.Get("User-Agent"), "kube-probe/")
 }
 
 // probeResponse writes an HTTP response to conn that satisfies the kubelet. It
-// sets the status code to [http.StatusNoContent] as the response does not
-// contain a body and it makes it simpler to detect a probe response in testing.
+// uses the status code 204 as the response does not contain a body and it
+// makes it simpler to detect a probe response in testing.
 func probeResponse(conn net.Conn) error {
-	resp := http.Response{
-		ProtoMajor: 1,
-		ProtoMinor: 1,
-		StatusCode: http.StatusNoContent,
-	}
-	return resp.Write(conn)
+	_, err := io.WriteString(conn, "HTTP/1.1 204 No Content\r\n\r\n")
+	return err
 }
 
 type bufConn struct {
