@@ -48,7 +48,8 @@ type Container struct {
 	initialProcess   process.Process
 	process          process.Process
 	cgroup           any
-	logPath          string
+	logFIFOs         []*os.File
+	logFIFOsMu       sync.Mutex
 	scaledDown       bool
 	dryRunScaledDown bool
 	dryRunSince      time.Time
@@ -84,11 +85,6 @@ func New(ctx context.Context, cfg *v1.Config, r *taskAPI.CreateTaskRequest, pt s
 		return nil, err
 	}
 
-	logPath, err := getLogPath(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("unable to get log path: %w", err)
-	}
-
 	vers, err := (&runcC.Runc{}).Version(ctx)
 	if err != nil {
 		log.G(ctx).Warnf("unable to get runc version: %s", err)
@@ -101,7 +97,6 @@ func New(ctx context.Context, cfg *v1.Config, r *taskAPI.CreateTaskRequest, pt s
 		context:           ctx,
 		platform:          pt,
 		cfg:               cfg,
-		logPath:           logPath,
 		netNS:             targetNS,
 		CheckpointRestore: &sync.Mutex{},
 		events:            events,
@@ -382,6 +377,7 @@ func (c *Container) Stop(ctx context.Context) {
 	c.sendEvent(status)
 	c.StopActivator(ctx)
 	c.cleanupImage(ctx)
+	c.ReleaseLogFIFOs()
 	_ = c.netNS.Close()
 }
 

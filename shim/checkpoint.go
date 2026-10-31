@@ -34,14 +34,13 @@ func (c *Container) scaleDown(ctx context.Context) error {
 		return err
 	}
 
+	c.holdLogFIFOs(ctx)
+	scaleDownFunc := c.checkpoint
 	if c.cfg.DisableCheckpointing {
-		if err := c.kill(ctx); err != nil {
-			return err
-		}
-		return nil
+		scaleDownFunc = c.kill
 	}
-
-	if err := c.checkpoint(ctx); err != nil {
+	if err := scaleDownFunc(ctx); err != nil {
+		c.ReleaseLogFIFOs()
 		return err
 	}
 
