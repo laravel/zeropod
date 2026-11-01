@@ -38,6 +38,7 @@ type testCase struct {
 	networks               []activator.Network
 	forwardToFunc          func(t *testing.T, port int) (string, *httptest.Server)
 	expectMissingPort      bool
+	disableRedirects       bool
 }
 
 func TestReuseActivator(t *testing.T) {
@@ -117,6 +118,16 @@ func TestReuseActivator(t *testing.T) {
 			expectLastActivity: false,
 			kubeletAddr:        new(netip.MustParseAddr("::1")),
 			networks:           []activator.Network{activator.NetworkTCPAny},
+		},
+		"kubelet traffic reaches app after disabling redirects": {
+			parallelReqs:       1,
+			cycles:             1,
+			expectedBody:       "app",
+			expectedCode:       http.StatusOK,
+			expectLastActivity: false,
+			kubeletAddr:        new(netip.MustParseAddr("127.0.0.1")),
+			networks:           []activator.Network{activator.NetworkTCP4},
+			disableRedirects:   true,
 		},
 		"forward": {
 			parallelReqs:       1,
@@ -225,6 +236,9 @@ func TestReuseActivator(t *testing.T) {
 			}
 
 			for range tc.cycles {
+				if tc.disableRedirects {
+					require.NoError(t, s.DisableRedirects())
+				}
 				for i := 0; i < tc.parallelReqs; i++ {
 					for _, net := range tc.networks {
 						wg.Go(func() {
