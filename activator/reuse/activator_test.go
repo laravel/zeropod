@@ -288,6 +288,59 @@ func TestReuseActivator(t *testing.T) {
 	}
 }
 
+// TestReuseActivatorMigrateProbe ensures that a kubelet connection pending in
+// the accept queue of a dual-stack app listener gets migrated to the probe
+// listener and not the wake listener when the app goes away.
+func TestReuseActivatorMigrateProbe(t *testing.T) {
+	require.NoError(t, activator.MountBPFFS(activator.BPFFSPath))
+	nn, err := ns.GetCurrentNS()
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	port, err := activator.FreePort()
+	require.NoError(t, err)
+	s, err := New(ctx, nn, "/sys/fs/cgroup", trackerInterface("lo"))
+	require.NoError(t, err)
+	defer s.Stop(ctx)
+
+	cmd, err := runApp(t, port, activator.NetworkTCPAny)
+	require.NoError(t, err)
+
+	woken := make(chan struct{}, 1)
+	require.NoError(t, s.Reload(
+		ProbeAddr(new(netip.MustParseAddr("127.0.0.1"))),
+		RestoreHook(func() (int, error) {
+			woken <- struct{}{}
+			return 0, errors.New("unexpected wake")
+		}),
+	))
+	listeners := activator.Listeners{{Port: uint16(port), Network: activator.NetworkTCPAny}}
+	require.NoError(t, s.Start(ctx, cmd.Process.Pid, listeners, false))
+	require.NoError(t, s.Reset())
+
+	require.NoError(t, cmd.Process.Signal(syscall.SIGSTOP))
+	conn, err := net.DialTimeout("tcp4", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
+	require.NoError(t, err)
+	//nolint:errcheck
+	defer conn.Close()
+	_, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n"))
+	require.NoError(t, err)
+
+	require.NoError(t, cmd.Process.Kill())
+	_ = cmd.Wait()
+
+	require.NoError(t, conn.SetDeadline(time.Now().Add(time.Second*2)))
+	b, err := io.ReadAll(conn)
+	require.NoError(t, err)
+	assert.Contains(t, string(b), "ok\n")
+	select {
+	case <-woken:
+		t.Error("probe connection migrated to wake listener")
+	default:
+	}
+}
+
 func runApp(t *testing.T, port int, networks ...activator.Network) (*exec.Cmd, error) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestReuseActivator$")
 

@@ -46,14 +46,14 @@ int select_or_migrate(struct sk_reuseport_md *md)
 
     struct bpf_sock *migrating = md->migrating_sk;
     if (migrating) {
-        // during migration dst_ip4/dst_ip6 is the remote address
-        if (migrating->family == AF_INET) {
-            __u32 saddr = migrating->dst_ip4;
-            if (saddr == *(volatile __u32 *)probe_addr) {
-                // bpf_printk("being migrated: %pI4", &saddr);
-                is_probe_traffic = true;
-            }
-        } else {
+        // during migration dst_ip4/dst_ip6 is the remote address. IPv4
+        // connections on a dual-stack listener have family AF_INET6 with a
+        // v4-mapped dst_ip6, so we check dst_ip4 regardless of family.
+        __u32 saddr = migrating->dst_ip4;
+        if (saddr != 0 && saddr == *(volatile __u32 *)probe_addr) {
+            // bpf_printk("being migrated: %pI4", &saddr);
+            is_probe_traffic = true;
+        } else if (migrating->family == AF_INET6) {
             if (__builtin_memcmp(migrating->dst_ip6, (void *)probe_addr, 16) == 0) {
                 // bpf_printk("being migrated: %pI6", &probe_addr);
                 is_probe_traffic = true;
