@@ -72,6 +72,7 @@ type Container struct {
 }
 
 func New(ctx context.Context, cfg *v1.Config, r *taskAPI.CreateTaskRequest, pt stdio.Platform, events chan *v1.ContainerStatus) (*Container, error) {
+	ctx = WithContainerLogger(ctx, r.ID)
 	// get network ns of our container and store it for later use
 	netNSPath, err := GetNetworkNS(cfg.Spec)
 	if err != nil {

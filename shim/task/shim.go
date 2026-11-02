@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/containerd/containerd/v2/pkg/shim"
+	"github.com/containerd/containerd/v2/version"
 	"github.com/containerd/log"
 	"github.com/containerd/ttrpc"
 	v1 "github.com/laravel/zeropod/api/shim/v1"
@@ -64,7 +65,7 @@ func startShimServer(ctx context.Context, id string, task *wrapper) {
 		}
 	}
 
-	log.G(ctx).Infof("starting shim server at %s", socket)
+	log.G(ctx).WithField("version", version.Version).WithField("socket", socket).Infof("starting shim server")
 	// write shim address to filesystem
 	if err := v1.WriteAddress("shim_address", socket); err != nil {
 		log.G(ctx).WithError(err).Errorf("failed to write shim address")
