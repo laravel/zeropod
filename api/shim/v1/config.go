@@ -372,6 +372,13 @@ func LiveMigrationEnabled(annotations map[string]string) bool {
 	return ok
 }
 
+func ContainerMigrationEnabled(container string, annotations map[string]string) bool {
+	migrate := annotations[MigrateAnnotationKey]
+	liveMigrate := annotations[LiveMigrateAnnotationKey]
+	return slices.Contains(strings.Split(migrate, containersDelim), container) ||
+		slices.Contains(strings.Split(liveMigrate, containersDelim), container)
+}
+
 func (cfg Config) LastModified() time.Time {
 	configPath, err := relativeConfigFile()
 	if err != nil {

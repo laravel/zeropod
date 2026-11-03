@@ -31,44 +31,71 @@ func TestPodReconcilerMigrationSource(t *testing.T) {
 	ctx := context.Background()
 
 	for name, tc := range map[string]struct {
-		pod                 *corev1.Pod
-		containerID         string
-		expectedContainerID string
-		deletePod           bool
-		nodeName            string
-		runtimeClassName    string
-		expectedMigration   bool
-		expectedRequeue     bool
-		expectedPhase       v1.MigrationPhase
-		garbageCollection   bool
+		pod                  *corev1.Pod
+		containerID          string
+		expectedContainerIDs []string
+		deletePod            bool
+		nodeName             string
+		runtimeClassName     string
+		expectedMigration    bool
+		expectedRequeue      bool
+		expectedPhase        v1.MigrationPhase
+		garbageCollection    bool
 	}{
 		"pod that should be migrated": {
-			pod:                 newMigratePod("node1", v1.RuntimeClassName, shimv1.ContainerPhase_SCALED_DOWN),
-			containerID:         "containerd://imageid",
-			expectedContainerID: "imageid",
-			deletePod:           true,
-			nodeName:            "node1",
-			expectedMigration:   true,
-			garbageCollection:   true,
-			expectedPhase:       v1.MigrationPhasePending,
+			pod:                  newMigratePod("node1", v1.RuntimeClassName, shimv1.ContainerPhase_SCALED_DOWN),
+			containerID:          "containerd://imageid",
+			expectedContainerIDs: []string{"imageid"},
+			deletePod:            true,
+			nodeName:             "node1",
+			expectedMigration:    true,
+			garbageCollection:    true,
+			expectedPhase:        v1.MigrationPhasePending,
 		},
 		"pod without live migration and running": {
-			pod:                 newMigratePod("node1", v1.RuntimeClassName, shimv1.ContainerPhase_RUNNING),
-			containerID:         "containerd://imageid",
-			expectedContainerID: "imageid",
-			deletePod:           true,
-			nodeName:            "node1",
-			expectedMigration:   true,
-			expectedPhase:       v1.MigrationPhaseFailed,
+			pod:                  newMigratePod("node1", v1.RuntimeClassName, shimv1.ContainerPhase_RUNNING),
+			containerID:          "containerd://imageid",
+			expectedContainerIDs: []string{"imageid"},
+			deletePod:            true,
+			nodeName:             "node1",
+			expectedMigration:    true,
+			expectedPhase:        v1.MigrationPhaseFailed,
 		},
 		"pod with live migration and running": {
-			pod:                 enableLiveMigration(newMigratePod("node1", v1.RuntimeClassName, shimv1.ContainerPhase_RUNNING)),
-			containerID:         "containerd://imageid",
-			expectedContainerID: "imageid",
-			deletePod:           true,
-			nodeName:            "node1",
-			expectedMigration:   true,
-			expectedPhase:       v1.MigrationPhasePending,
+			pod:                  enableLiveMigration(newMigratePod("node1", v1.RuntimeClassName, shimv1.ContainerPhase_RUNNING)),
+			containerID:          "containerd://imageid",
+			expectedContainerIDs: []string{"imageid"},
+			deletePod:            true,
+			nodeName:             "node1",
+			expectedMigration:    true,
+			expectedPhase:        v1.MigrationPhasePending,
+		},
+		"pod with non-migrating sidecar": {
+			pod:                  addContainer(newMigratePod("node1", v1.RuntimeClassName, shimv1.ContainerPhase_SCALED_DOWN), "sidecar"),
+			containerID:          "containerd://imageid",
+			expectedContainerIDs: []string{"imageid"},
+			deletePod:            true,
+			nodeName:             "node1",
+			expectedMigration:    true,
+			expectedPhase:        v1.MigrationPhasePending,
+		},
+		"pod with multiple migrating containers": {
+			pod: addMigrateContainer(addMigrateContainer(
+				newMigratePod("node1", v1.RuntimeClassName, shimv1.ContainerPhase_SCALED_DOWN), "app2"), "app3",
+			),
+			containerID:          "containerd://imageid",
+			expectedContainerIDs: []string{"imageid", "app2", "app3"},
+			deletePod:            true,
+			nodeName:             "node1",
+			expectedMigration:    true,
+			expectedPhase:        v1.MigrationPhasePending,
+		},
+		"pod without matching migrate container": {
+			pod:               setMigrateAnnotation(newMigratePod("node1", v1.RuntimeClassName, shimv1.ContainerPhase_SCALED_DOWN), "other"),
+			containerID:       "containerd://imageid",
+			deletePod:         true,
+			nodeName:          "node1",
+			expectedMigration: false,
 		},
 		"pod on wrong node": {
 			pod:               newMigratePod("node2", v1.RuntimeClassName, shimv1.ContainerPhase_SCALED_DOWN),
@@ -117,10 +144,15 @@ func TestPodReconcilerMigrationSource(t *testing.T) {
 			if tc.expectedMigration {
 				migration := &v1.Migration{}
 				assert.NoError(t, kube.Get(ctx, client.ObjectKeyFromObject(tc.pod), migration))
-				require.NotEmpty(t, migration.Spec.Containers)
-				require.NotEmpty(t, migration.Status.Containers)
-				assert.Equal(t, tc.expectedPhase, migration.Status.Containers[0].Condition.Phase)
-				assert.Equal(t, tc.expectedContainerID, migration.Spec.Containers[0].ID)
+				ids := []string{}
+				for _, container := range migration.Spec.Containers {
+					ids = append(ids, container.ID)
+				}
+				assert.Equal(t, tc.expectedContainerIDs, ids)
+				require.Len(t, migration.Status.Containers, len(tc.expectedContainerIDs))
+				for _, status := range migration.Status.Containers {
+					assert.Equal(t, tc.expectedPhase, status.Condition.Phase, status.Name)
+				}
 				hasRef, err := controllerutil.HasOwnerReference(migration.OwnerReferences, tc.pod, kube.Scheme())
 				assert.NoError(t, err)
 				assert.Equal(t, tc.garbageCollection, hasRef, "owner reference")
@@ -268,6 +300,27 @@ func newTestMigration(podTemplateHash string) *v1.Migration {
 
 func enableLiveMigration(pod *corev1.Pod) *corev1.Pod {
 	pod.Annotations[nodev1.LiveMigrateAnnotationKey] = pod.Spec.Containers[0].Name
+	return pod
+}
+
+func addContainer(pod *corev1.Pod, name string) *corev1.Pod {
+	pod.Spec.Containers = append(pod.Spec.Containers, corev1.Container{Name: name})
+	pod.Status.ContainerStatuses = append(pod.Status.ContainerStatuses, corev1.ContainerStatus{
+		Name:        name,
+		ContainerID: "containerd://" + name,
+	})
+	return pod
+}
+
+func addMigrateContainer(pod *corev1.Pod, name string) *corev1.Pod {
+	pod = addContainer(pod, name)
+	pod.Annotations[nodev1.MigrateAnnotationKey] += "," + name
+	pod.Labels[path.Join(StatusLabelKeyPrefix, name)] = shimv1.ContainerPhase_SCALED_DOWN.String()
+	return pod
+}
+
+func setMigrateAnnotation(pod *corev1.Pod, containers string) *corev1.Pod {
+	pod.Annotations[nodev1.MigrateAnnotationKey] = containers
 	return pod
 }
 

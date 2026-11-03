@@ -183,6 +183,10 @@ func (r podReconciler) prepareMigrationSource(ctx context.Context, pod *corev1.P
 	if err != nil {
 		return fmt.Errorf("initializing migration object: %w", err)
 	}
+	if len(migration.Spec.Containers) == 0 {
+		log.Info("migration has no containers, skipping create")
+		return nil
+	}
 	if err := r.kube.Create(ctx, migration); err != nil {
 		if !errors.IsAlreadyExists(err) {
 			return fmt.Errorf("creating migration object: %w", err)
@@ -265,6 +269,9 @@ func (r podReconciler) newMigration(pod *corev1.Pod) (*v1.Migration, error) {
 		u, err := url.Parse(container.ContainerID)
 		if err != nil {
 			return nil, fmt.Errorf("unable to parse container ID %s", container.ContainerID)
+		}
+		if !shimv1.ContainerMigrationEnabled(container.Name, pod.Annotations) {
+			continue
 		}
 		containers = append(containers, v1.MigrationContainer{
 			Name: container.Name,
