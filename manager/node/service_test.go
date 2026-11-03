@@ -8,6 +8,7 @@ import (
 
 	nodev1 "github.com/laravel/zeropod/api/node/v1"
 	v1 "github.com/laravel/zeropod/api/runtime/v1"
+	shimv1 "github.com/laravel/zeropod/api/shim/v1"
 	"github.com/laravel/zeropod/manager"
 	"github.com/laravel/zeropod/manager/capacity"
 	"github.com/prometheus/client_golang/prometheus"
@@ -290,6 +291,52 @@ func TestRestoreCapacityAlreadyEvicted(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 1.0, evictions)
+}
+
+func TestRestoreCapacityMigrationFinal(t *testing.T) {
+	scheme := runtime.NewScheme()
+	assert.NoError(t, corev1.AddToScheme(scheme))
+	assert.NoError(t, v1.AddToScheme(scheme))
+	node := newNode("node", corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("4"),
+		corev1.ResourceMemory: resource.MustParse("1Gi"),
+	})
+	pod := newPod("app1", corev1.ResourceList{
+		corev1.ResourceCPU:    resource.MustParse("1"),
+		corev1.ResourceMemory: resource.MustParse("2Gi"),
+	})
+	pod.Annotations = map[string]string{shimv1.MigrateAnnotationKey: "app1"}
+	pod.DeletionTimestamp = new(metav1.Now())
+	pod.Finalizers = []string{"test"}
+	migration := newMigration("")
+	migration.Status.Containers = []v1.MigrationContainerStatus{{
+		Name:      "app1",
+		Condition: v1.MigrationCondition{Phase: v1.MigrationPhaseUnclaimed},
+	}}
+	cap := capacity.NewNodeTracker(prometheus.NewRegistry(), "name", capacity.CPUThreshold(1.0), capacity.MemoryThreshold(1.0))
+	for name, q := range node.Status.Capacity {
+		cap.SetCapacity(name, q)
+	}
+	ns := &nodeService{
+		kube:     fake.NewClientBuilder().WithScheme(scheme).WithObjects(node, pod, migration).Build(),
+		nodeName: node.Name,
+		log:      slog.Default(),
+		cap:      cap,
+		timeouts: Timeouts{EvictionTimeout: time.Minute},
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	resp, err := ns.RestoreCapacity(ctx, &nodev1.RestoreCapacityRequest{
+		PodInfo: &nodev1.PodInfo{
+			Name:          pod.Name,
+			Namespace:     pod.Namespace,
+			ContainerName: "app1",
+		},
+	})
+	assert.NoError(t, err)
+	assert.NoError(t, ctx.Err(), "should stop waiting once the migration is final")
+	assert.False(t, resp.Allowed)
+	assert.Empty(t, resp.RedirectAddr)
 }
 
 func TestRestore(t *testing.T) {

@@ -361,6 +361,10 @@ func (ns *nodeService) evictPod(ctx context.Context, req *nodev1.RestoreCapacity
 		if migration.Spec.TargetPodIP != "" {
 			return true, nil
 		}
+		if migrationFinal(migration, req.PodInfo.ContainerName) {
+			log.Info("migration is final without target pod IP, stopping wait")
+			return true, nil
+		}
 		return false, nil
 	}); err != nil {
 		// although we failed to get a target IP, the pod has already been
@@ -1138,6 +1142,16 @@ func setOrUpdateContainerStatus(migration *v1.Migration, containerName string, u
 // on certain events and calls the condition immediately.
 func pollUntilContextCancel(ctx context.Context, condition wait.ConditionWithContextFunc) error {
 	return wait.PollUntilContextCancel(ctx, time.Millisecond*10, true, condition)
+}
+
+func migrationFinal(migration *v1.Migration, containerName string) bool {
+	return slices.ContainsFunc(
+		migration.Status.Containers,
+		func(container v1.MigrationContainerStatus) bool {
+			return container.Name == containerName &&
+				container.Condition.Phase.Final()
+		},
+	)
 }
 
 func migrationFailed(migration *v1.Migration, containerName string) bool {
