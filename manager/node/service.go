@@ -78,10 +78,41 @@ type Timeouts struct {
 	PagesTransfer time.Duration
 }
 
+var DefaultTimeouts = Timeouts{
+	MigrationClaim:   10 * time.Second,
+	MigrationReady:   5 * time.Minute,
+	MigrationServers: 10 * time.Second,
+	EvictionTimeout:  time.Minute,
+	PagesTransfer:    5 * time.Minute,
+}
+
+// ServerOption is used for functional opts on the node server.
+type ServerOption func(*nodeService)
+
+func ServerTimeouts(timeouts Timeouts) ServerOption {
+	return func(ns *nodeService) {
+		ns.timeouts = timeouts
+	}
+}
+
+func CapacityTracker(cap capacity.Tracker) ServerOption {
+	return func(ns *nodeService) {
+		ns.cap = cap
+	}
+}
+
+// DenyDeletionRestore denies restoring containers of pods that are already
+// being deleted.
+func DenyDeletionRestore(deny bool) ServerOption {
+	return func(ns *nodeService) {
+		ns.denyDeletionRestore = deny
+	}
+}
+
 // NewServer starts a node server with two listeners:
 // * Unix socket for the shims to connect to it locally
 // * TCP+TLS socket to allow the other node instances to connect
-func NewServer(addr string, kube client.Client, log *slog.Logger, timeouts Timeouts, cap capacity.Tracker) (*Server, error) {
+func NewServer(addr string, kube client.Client, log *slog.Logger, opts ...ServerOption) (*Server, error) {
 	host, ok := os.LookupEnv(nodev1.PodIPEnvKey)
 	if !ok {
 		return nil, fmt.Errorf("could not find host, env POD_IP is not set")
@@ -118,7 +149,7 @@ func NewServer(addr string, kube client.Client, log *slog.Logger, timeouts Timeo
 		liveMigrationSupported = false
 	}
 
-	nodev1.RegisterNodeService(s, &nodeService{
+	ns := &nodeService{
 		kube:                   kube,
 		log:                    log.With("node", nodeName),
 		host:                   host,
@@ -127,16 +158,21 @@ func NewServer(addr string, kube client.Client, log *slog.Logger, timeouts Timeo
 		tlsConfig:              tlsConfig,
 		pageServerTLS:          true,
 		liveMigrationSupported: liveMigrationSupported,
-		timeouts:               timeouts,
-		cap:                    cap,
-	})
+		timeouts:               DefaultTimeouts,
+		cap:                    capacity.NewNoopTracker(),
+	}
+	for _, opt := range opts {
+		opt(ns)
+	}
+	nodev1.RegisterNodeService(s, ns)
 
 	log.Info("new node server",
 		"name", nodeName,
 		"live_migration_supported", liveMigrationSupported,
-		"capacity_tracker", reflect.TypeOf(cap).String(),
-		"eviction_threshold_cpu", cap.Threshold(corev1.ResourceCPU),
-		"eviction_threshold_memory", cap.Threshold(corev1.ResourceMemory),
+		"deny_deletion_restore", ns.denyDeletionRestore,
+		"capacity_tracker", reflect.TypeOf(ns.cap).String(),
+		"eviction_threshold_cpu", ns.cap.Threshold(corev1.ResourceCPU),
+		"eviction_threshold_memory", ns.cap.Threshold(corev1.ResourceMemory),
 	)
 	return &Server{
 		ttrpc:        s,
@@ -215,6 +251,7 @@ type nodeService struct {
 	timeouts               Timeouts
 	cap                    capacity.Tracker
 	evicted                evictedPods
+	denyDeletionRestore    bool
 }
 
 // evictedPods keeps track of pods that have been evicted by this node. This is
@@ -225,12 +262,8 @@ type evictedPods struct {
 }
 
 // add marks the pod as evicted and returns true if it was not already being
-// evicted. Pods that already have a deletion timestamp are not stored as the
-// cache has caught up. Entries older than ttl are pruned.
+// evicted. Entries older than ttl are pruned.
 func (e *evictedPods) add(pod *corev1.Pod, ttl time.Duration) bool {
-	if !pod.DeletionTimestamp.IsZero() {
-		return false
-	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.pods == nil {
@@ -248,12 +281,8 @@ func (e *evictedPods) add(pod *corev1.Pod, ttl time.Duration) bool {
 	return true
 }
 
-// contains returns true if the pod is being deleted or has been evicted
-// within ttl.
+// contains returns true if the pod has been evicted within ttl.
 func (e *evictedPods) contains(pod *corev1.Pod, ttl time.Duration) bool {
-	if !pod.DeletionTimestamp.IsZero() {
-		return true
-	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	evictedAt, ok := e.pods[pod.UID]
@@ -282,8 +311,12 @@ func (ns *nodeService) RestoreCapacity(ctx context.Context, req *nodev1.RestoreC
 	if err := ns.kube.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
 		return nil, err
 	}
-	if ns.evicted.contains(pod, ns.timeouts.EvictionTimeout) {
+	if ns.denyDeletionRestore && !pod.DeletionTimestamp.IsZero() {
 		log.Info("pod is already being deleted, denying restore")
+		return ns.evictPod(ctx, req, pod)
+	}
+	if ns.evicted.contains(pod, ns.timeouts.EvictionTimeout) {
+		log.Info("pod is already being evicted, denying restore")
 		return ns.evictPod(ctx, req, pod)
 	}
 	res, err := getContainerResources(pod, req.PodInfo.ContainerName)
@@ -329,11 +362,14 @@ func (ns *nodeService) evictPod(ctx context.Context, req *nodev1.RestoreCapacity
 		log.Error("tainting node", "error", err)
 		return &nodev1.RestoreCapacityResponse{Allowed: true}, fmt.Errorf("evicting pod: tainting node: %w", err)
 	}
+	// checked before deleting as we don't want to count pods that were already
+	// being deleted by someone else as evictions.
+	alreadyDeleting := !pod.DeletionTimestamp.IsZero()
 	if err := ns.kube.Delete(ctx, pod); err != nil {
 		log.Error("deleting pod", "error", err)
 		return &nodev1.RestoreCapacityResponse{Allowed: true}, fmt.Errorf("evicting pod: %w", err)
 	}
-	if firstEviction := ns.evicted.add(pod, ns.timeouts.EvictionTimeout); firstEviction {
+	if firstEviction := ns.evicted.add(pod, ns.timeouts.EvictionTimeout); firstEviction && !alreadyDeleting {
 		ns.cap.IncEvicted()
 	}
 	if !shimv1.AnyMigrationEnabled(pod.Annotations) {

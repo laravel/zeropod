@@ -56,16 +56,18 @@ func TestSetContainerStatus(t *testing.T) {
 
 func TestRestoreCapacity(t *testing.T) {
 	for name, tc := range map[string]struct {
-		node            *corev1.Node
-		pod             *corev1.Pod
-		migration       *v1.Migration
-		cpuThreshold    float64
-		memoryThreshold float64
-		containerName   string
-		allowed         bool
-		expectedErr     bool
-		podScaledDown   bool
-		podDeleting     bool
+		node                *corev1.Node
+		pod                 *corev1.Pod
+		migration           *v1.Migration
+		cpuThreshold        float64
+		memoryThreshold     float64
+		containerName       string
+		allowed             bool
+		expectedErr         bool
+		podScaledDown       bool
+		podDeleting         bool
+		denyDeletionRestore bool
+		evictions           float64
 	}{
 		"empty node": {
 			node: newNode("empty", nil),
@@ -115,6 +117,7 @@ func TestRestoreCapacity(t *testing.T) {
 			migration:       newMigration("10.0.0.1"),
 			containerName:   "app1",
 			allowed:         false,
+			evictions:       1,
 			cpuThreshold:    1.0,
 			memoryThreshold: 1.0,
 		},
@@ -130,6 +133,7 @@ func TestRestoreCapacity(t *testing.T) {
 			migration:       newMigration("10.0.0.1"),
 			containerName:   "app1",
 			allowed:         false,
+			evictions:       1,
 			cpuThreshold:    1,
 			memoryThreshold: 0.1,
 		},
@@ -145,6 +149,7 @@ func TestRestoreCapacity(t *testing.T) {
 			migration:       newMigration("10.0.0.1"),
 			containerName:   "app1",
 			allowed:         false,
+			evictions:       1,
 			cpuThreshold:    0.1,
 			memoryThreshold: 1.0,
 		},
@@ -160,6 +165,7 @@ func TestRestoreCapacity(t *testing.T) {
 			migration:       newMigration("10.0.0.1"),
 			containerName:   "app1",
 			allowed:         false,
+			evictions:       1,
 			podScaledDown:   true,
 			cpuThreshold:    1.0,
 			memoryThreshold: 1.0,
@@ -173,9 +179,42 @@ func TestRestoreCapacity(t *testing.T) {
 				corev1.ResourceCPU:    resource.MustParse("1"),
 				corev1.ResourceMemory: resource.MustParse("1Gi"),
 			}),
+			migration:           newMigration("10.0.0.1"),
+			containerName:       "app1",
+			allowed:             false,
+			podDeleting:         true,
+			denyDeletionRestore: true,
+			cpuThreshold:        1.0,
+			memoryThreshold:     1.0,
+		},
+		"pod being deleted at capacity": {
+			node: newNode("full-mem", corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("1Gi"),
+			}),
+			pod: newPod("app1", corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("2Gi"),
+			}),
 			migration:       newMigration("10.0.0.1"),
 			containerName:   "app1",
 			allowed:         false,
+			podDeleting:     true,
+			cpuThreshold:    1.0,
+			memoryThreshold: 1.0,
+		},
+		"pod being deleted with enough capacity": {
+			node: newNode("enough", corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("4"),
+				corev1.ResourceMemory: resource.MustParse("20Gi"),
+			}),
+			pod: newPod("app1", corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1"),
+				corev1.ResourceMemory: resource.MustParse("1Gi"),
+			}),
+			migration:       newMigration("10.0.0.1"),
+			containerName:   "app1",
+			allowed:         true,
 			podDeleting:     true,
 			cpuThreshold:    1.0,
 			memoryThreshold: 1.0,
@@ -197,8 +236,9 @@ func TestRestoreCapacity(t *testing.T) {
 				objs = append(objs, tc.migration)
 			}
 			kube := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
+			reg := prometheus.NewRegistry()
 			cap := capacity.NewNodeTracker(
-				prometheus.NewRegistry(),
+				reg,
 				"name",
 				capacity.CPUThreshold(tc.cpuThreshold),
 				capacity.MemoryThreshold(tc.memoryThreshold),
@@ -208,10 +248,11 @@ func TestRestoreCapacity(t *testing.T) {
 			}
 			slog.SetLogLoggerLevel(slog.LevelDebug)
 			ns := &nodeService{
-				kube:     kube,
-				nodeName: tc.node.Name,
-				log:      slog.Default(),
-				cap:      cap,
+				kube:                kube,
+				nodeName:            tc.node.Name,
+				log:                 slog.Default(),
+				cap:                 cap,
+				denyDeletionRestore: tc.denyDeletionRestore,
 			}
 			resp, err := ns.RestoreCapacity(t.Context(), &nodev1.RestoreCapacityRequest{
 				PodInfo: &nodev1.PodInfo{
@@ -227,6 +268,7 @@ func TestRestoreCapacity(t *testing.T) {
 			}
 			assert.NotNil(t, resp)
 			assert.Equal(t, tc.allowed, resp.Allowed)
+			assert.Equal(t, tc.evictions, evictionCount(t, reg))
 			if tc.allowed {
 				assert.Empty(t, resp.RedirectAddr)
 			}
@@ -282,15 +324,18 @@ func TestRestoreCapacityAlreadyEvicted(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, resp.Allowed)
 
+	assert.Equal(t, 1.0, evictionCount(t, reg))
+}
+
+func evictionCount(t *testing.T, reg *prometheus.Registry) float64 {
 	mfs, err := reg.Gather()
 	assert.NoError(t, err)
-	evictions := 0.0
 	for _, mf := range mfs {
 		if mf.GetName() == "zeropod_"+capacity.MetricNodeEvictions {
-			evictions = mf.GetMetric()[0].GetCounter().GetValue()
+			return mf.GetMetric()[0].GetCounter().GetValue()
 		}
 	}
-	assert.Equal(t, 1.0, evictions)
+	return 0
 }
 
 func TestRestoreCapacityMigrationFinal(t *testing.T) {
