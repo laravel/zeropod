@@ -80,7 +80,12 @@ func NewZeropodService(ctx context.Context, publisher shim.Publisher, sd shutdow
 		return nil, fmt.Errorf("failed to initialized platform behavior: %w", err)
 	}
 	go w.forward(ctx, publisher)
-	sd.RegisterCallback(func(context.Context) error {
+	sd.RegisterCallback(func(ctx context.Context) error {
+		w.mut.Lock()
+		defer w.mut.Unlock()
+		for _, c := range w.zeropodContainers {
+			c.Stop(ctx)
+		}
 		close(w.events)
 		return nil
 	})
@@ -149,12 +154,6 @@ func (w *wrapper) Create(ctx context.Context, r *taskAPI.CreateTaskRequest) (_ *
 
 	zeropodContainer.RegisterPostRestore(func(c *runc.Container, handleStarted zshim.HandleStartedFunc) {
 		w.postRestore(c, handleStarted)
-	})
-
-	w.shutdown.RegisterCallback(func(ctx context.Context) error {
-		// stop server on shutdown
-		zeropodContainer.Stop(ctx)
-		return nil
 	})
 
 	if cfg.AnyMigrationEnabled() {
