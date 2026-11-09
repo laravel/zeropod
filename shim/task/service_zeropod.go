@@ -421,6 +421,7 @@ func (w *wrapper) Kill(ctx context.Context, r *taskAPI.KillRequest) (*emptypb.Em
 			log.G(ctx).Infof("requested scaled down process %d to be killed", zeropodContainer.Process().Pid())
 			zeropodContainer.Process().SetExited(0)
 			zeropodContainer.InitialProcess().SetExited(0)
+			zeropodContainer.ReleaseLogFIFOs()
 			return w.service.Kill(ctx, r)
 		}
 

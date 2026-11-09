@@ -2,6 +2,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"runtime"
 	"strings"
@@ -338,6 +339,31 @@ func TestE2E(t *testing.T) {
 		t.Log(stdout, stderr)
 		// since the cleanup has been deferred it's called right after the
 		// exec and should test the deletion in the restored state.
+	})
+
+	t.Run("logs after restore", func(t *testing.T) {
+		pod := testPod(scaleDownAfter(time.Second))
+		cleanupPod := createPodAndWait(t, ctx, e2e.client, pod)
+		defer cleanupPod()
+
+		for i := range 2 {
+			waitUntilScaledDown(t, ctx, e2e.client, pod)
+			stdoutMarker := fmt.Sprintf("restored-stdout-%d", i)
+			stderrMarker := fmt.Sprintf("restored-stderr-%d", i)
+			_, _, err := podExec(e2e.cfg, pod, fmt.Sprintf(
+				"echo %s > /proc/1/fd/1 && echo %s > /proc/1/fd/2", stdoutMarker, stderrMarker,
+			))
+			require.NoError(t, err)
+
+			require.Eventually(t, func() bool {
+				logs, err := getPodLogs(ctx, e2e.cfg, *pod)
+				if err != nil {
+					t.Logf("error getting pod logs: %s", err)
+					return false
+				}
+				return strings.Contains(logs, stdoutMarker) && strings.Contains(logs, stderrMarker)
+			}, time.Second*10, time.Second, "expected markers in logs after restore %d", i)
+		}
 	})
 
 	t.Run("resources scaling", func(t *testing.T) {

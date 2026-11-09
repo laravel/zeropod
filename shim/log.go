@@ -2,13 +2,11 @@ package shim
 
 import (
 	"context"
-	"fmt"
 	"os"
-	"path/filepath"
-	"sort"
 
+	"github.com/containerd/fifo"
 	"github.com/containerd/log"
-	v1 "github.com/laravel/zeropod/api/shim/v1"
+	"golang.org/x/sys/unix"
 )
 
 // WithContainerLogger adds the container ID to the logger of the context.
@@ -16,29 +14,38 @@ func WithContainerLogger(ctx context.Context, id string) context.Context {
 	return log.WithLogger(ctx, log.G(ctx).WithField("container", id))
 }
 
-// getLogPath gets the log path of the container by searching for the last log
-// file in the CRI pod log path.
-// TODO: it would be nicer to get this path via annotations but it looks like
-// containerd only passes that to the sandbox container (pause). One possible
-// solution would be to implement log restoring in the sandbox container
-// instead of the zeropod.
-func getLogPath(cfg *v1.Config) (string, error) {
-	logDir := fmt.Sprintf("/var/log/pods/%s_%s_%s/%s", cfg.PodNamespace, cfg.PodName, cfg.PodUID, cfg.ContainerName)
-
-	dir, err := os.Open(logDir)
-	if err != nil {
-		return "", err
+// holdLogFIFOs opens an additional write end on the stdout/stderr fifos of the
+// container while it is scaled down. Once the process exits on scale down,
+// the shim closes its write end of the fifos which would cause CRI to see an
+// EOF and stop logging. By holding another write end, CRI keeps reading from
+// the fifos until the restored process writes to them again. The hold must be
+// released once the restored process is started or the container exits, as
+// CRI waits for the EOF before deleting the task.
+func (c *Container) holdLogFIFOs(ctx context.Context) {
+	c.logFIFOsMu.Lock()
+	defer c.logFIFOsMu.Unlock()
+	if len(c.logFIFOs) > 0 {
+		return
 	}
-	//nolint:errcheck
-	defer dir.Close()
-
-	names, err := dir.Readdirnames(0)
-	if err != nil {
-		return "", err
+	stdio := c.initialProcess.Stdio()
+	for _, path := range []string{stdio.Stdout, stdio.Stderr} {
+		if ok, _ := fifo.IsFifo(path); !ok {
+			continue
+		}
+		fd, err := unix.Open(path, unix.O_WRONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+		if err != nil {
+			log.G(ctx).WithError(err).Warnf("holding log fifo %s, logs will be lost after restore", path)
+			continue
+		}
+		c.logFIFOs = append(c.logFIFOs, os.NewFile(uintptr(fd), path))
 	}
-	sort.Slice(names, func(i, j int) bool {
-		return i < j
-	})
+}
 
-	return filepath.Join(logDir, names[len(names)-1]), nil
+func (c *Container) ReleaseLogFIFOs() {
+	c.logFIFOsMu.Lock()
+	defer c.logFIFOsMu.Unlock()
+	for _, f := range c.logFIFOs {
+		_ = f.Close()
+	}
+	c.logFIFOs = nil
 }

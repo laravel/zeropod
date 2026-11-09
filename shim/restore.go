@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/netip"
 	"os"
@@ -15,10 +14,7 @@ import (
 	"github.com/containerd/containerd/api/types/runc/options"
 	"github.com/containerd/containerd/v2/cmd/containerd-shim-runc-v2/process"
 	"github.com/containerd/containerd/v2/cmd/containerd-shim-runc-v2/runc"
-	"github.com/containerd/containerd/v2/pkg/cio"
-	cioutil "github.com/containerd/containerd/v2/pkg/ioutil"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
-	"github.com/containerd/containerd/v2/pkg/stdio"
 	runcC "github.com/containerd/go-runc"
 	"github.com/containerd/log"
 	"github.com/containerd/ttrpc"
@@ -26,7 +22,6 @@ import (
 	"github.com/laravel/zeropod/activator"
 	nodev1 "github.com/laravel/zeropod/api/node/v1"
 	v1 "github.com/laravel/zeropod/api/shim/v1"
-	crio "github.com/laravel/zeropod/shim/io"
 	"golang.org/x/sys/unix"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -75,6 +70,7 @@ func (c *Container) Restore(ctx context.Context) (*runc.Container, process.Proce
 		c.cfg.DisableCheckpointing = true
 		cont, p, err = c.restore(ctx)
 	}
+	c.ReleaseLogFIFOs()
 	return cont, p, err
 }
 
@@ -82,22 +78,6 @@ func (c *Container) restore(ctx context.Context) (*runc.Container, process.Proce
 	// cleanup image regardless of success/failure
 	defer c.deleteImage(ctx)
 	beforeRestore := time.Now()
-	go func() {
-		// as soon as we checkpoint the container, the log pipe is closed. As
-		// we currently have no way to instruct containerd to restore the logs
-		// and pipe it again, we do it manually.
-		if err := c.restoreLoggers(
-			c.ID(),
-			stdio.Stdio{
-				Stdin:    c.initialProcess.Stdio().Stdin,
-				Stdout:   c.initialProcess.Stdio().Stdout,
-				Stderr:   c.initialProcess.Stdio().Stderr,
-				Terminal: c.initialProcess.Stdio().Terminal,
-			},
-		); err != nil {
-			log.G(ctx).Errorf("error restoring loggers: %s", err)
-		}
-	}()
 
 	createReq := &task.CreateTaskRequest{
 		ID:               c.ID(),
@@ -187,81 +167,6 @@ func (c *Container) cleanupFailedStart(ctx context.Context, p process.Process) {
 	if err := initProc.Runtime().Delete(ctx, c.ID(), &runcC.DeleteOpts{Force: true}); err != nil {
 		log.G(ctx).WithError(err).Warn("deleting runc container after failed start")
 	}
-}
-
-// restoreLoggers creates the appropriate fifos and pipes the logs to the
-// container log at s.logPath. It blocks until the logs are closed. This has
-// been adapted from internal containerd code and the logging setup should be
-// pretty much the same.
-func (c *Container) restoreLoggers(id string, stdio stdio.Stdio) error {
-	fifos := cio.NewFIFOSet(cio.Config{
-		Stdin:    "",
-		Stdout:   stdio.Stdout,
-		Stderr:   stdio.Stderr,
-		Terminal: false,
-	}, func() error { return nil })
-
-	stdoutWC, stderrWC, err := createContainerLoggers(c.context, c.logPath, false)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err != nil {
-			if stdoutWC != nil {
-				_ = stdoutWC.Close()
-			}
-			if stderrWC != nil {
-				_ = stderrWC.Close()
-			}
-		}
-	}()
-	containerIO, err := crio.NewContainerIO(id, crio.WithFIFOs(fifos))
-	if err != nil {
-		return err
-	}
-	containerIO.AddOutput("log", stdoutWC, stderrWC)
-	containerIO.Pipe()
-
-	return nil
-}
-
-func createContainerLoggers(ctx context.Context, logPath string, tty bool) (stdout io.WriteCloser, stderr io.WriteCloser, err error) {
-	// from github.com/containerd/containerd/pkg/cri/config
-	const maxContainerLogLineSize = 16 * 1024
-
-	if logPath != "" {
-		// Only generate container log when log path is specified.
-		f, err := os.OpenFile(logPath, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0777)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to create and open log file: %w", err)
-		}
-		defer func() {
-			if err != nil {
-				_ = f.Close()
-			}
-		}()
-		var stdoutCh, stderrCh <-chan struct{}
-		wc := cioutil.NewSerialWriteCloser(f)
-		stdout, stdoutCh = crio.NewCRILogger(logPath, wc, crio.Stdout, maxContainerLogLineSize)
-		// Only redirect stderr when there is no tty.
-		if !tty {
-			stderr, stderrCh = crio.NewCRILogger(logPath, wc, crio.Stderr, maxContainerLogLineSize)
-		}
-		go func() {
-			if stdoutCh != nil {
-				<-stdoutCh
-			}
-			if stderrCh != nil {
-				<-stderrCh
-			}
-			log.G(ctx).Infof("finish redirecting log file %q, closing it", logPath)
-			_ = f.Close()
-		}()
-	} else {
-		stdout = crio.NewDiscardLogger()
-		stderr = crio.NewDiscardLogger()
-	}
-	return
 }
 
 // MigrationRestore requests a restore from the node. If a matching migration is
