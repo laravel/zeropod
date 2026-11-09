@@ -51,6 +51,8 @@ type Container struct {
 	logFIFOs         []*os.File
 	logFIFOsMu       sync.Mutex
 	scaledDown       bool
+	execs            map[string]struct{}
+	execsMu          sync.Mutex
 	dryRunScaledDown bool
 	dryRunSince      time.Time
 	dryRunPollTimer  *time.Timer
@@ -352,6 +354,36 @@ func (c *Container) sendEvent(event *v1.ContainerStatus) {
 
 func (c *Container) ScaledDown() bool {
 	return c.scaledDown
+}
+
+// AddExec tracks an exec as in flight, which prevents scaling down until it
+// is removed with RemoveExec. It waits for any checkpoint or restore in
+// progress and returns whether the container is scaled down.
+func (c *Container) AddExec(id string) bool {
+	c.CheckpointRestore.Lock()
+	defer c.CheckpointRestore.Unlock()
+	c.execsMu.Lock()
+	defer c.execsMu.Unlock()
+	if c.execs == nil {
+		c.execs = map[string]struct{}{}
+	}
+	c.execs[id] = struct{}{}
+	return c.scaledDown
+}
+
+// RemoveExec stops tracking an exec and returns the number of execs still in
+// flight.
+func (c *Container) RemoveExec(id string) int {
+	c.execsMu.Lock()
+	defer c.execsMu.Unlock()
+	delete(c.execs, id)
+	return len(c.execs)
+}
+
+func (c *Container) inFlightExecs() int {
+	c.execsMu.Lock()
+	defer c.execsMu.Unlock()
+	return len(c.execs)
 }
 
 func (c *Container) ID() string {
