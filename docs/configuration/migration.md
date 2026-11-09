@@ -12,6 +12,10 @@ the new pod will fetch the checkpoints of these containers and instead of
 starting it will simply wait for activation again. This minmizes the surge in
 resources if for example a whole node of scaled down zeropods is drained.
 
+If a container is restored on the source pod while the migration is still in
+progress, the checkpoint is stale and the migration is aborted. The new pod
+then starts the container from scratch instead of waiting for a timeout.
+
 <details><summary>show offline migration diagram</summary>
 
 ![live migration diagram](./diagrams/offline-migration.drawio.png)
