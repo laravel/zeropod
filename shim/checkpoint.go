@@ -26,7 +26,15 @@ func (c *Container) scaleDown(ctx context.Context) error {
 		return c.dryRunScaleDown(ctx)
 	}
 
+	c.CheckpointRestore.Lock()
+	defer c.CheckpointRestore.Unlock()
+
 	if c.ScaledDown() {
+		return nil
+	}
+
+	if n := c.inFlightExecs(); n > 0 {
+		log.G(ctx).Infof("not scaling down, %d exec(s) in flight", n)
 		return nil
 	}
 
@@ -48,8 +56,6 @@ func (c *Container) scaleDown(ctx context.Context) error {
 }
 
 func (c *Container) kill(ctx context.Context) error {
-	c.CheckpointRestore.Lock()
-	defer c.CheckpointRestore.Unlock()
 	log.G(ctx).Infof("checkpointing is disabled, scaling down by killing")
 
 	// we access the initProcess so we can force delete
@@ -81,9 +87,6 @@ func (c *Container) prepareSnapshotDir() (string, string, error) {
 }
 
 func (c *Container) checkpoint(ctx context.Context) error {
-	c.CheckpointRestore.Lock()
-	defer c.CheckpointRestore.Unlock()
-
 	snapshotDir, workDir, err := c.prepareSnapshotDir()
 	if err != nil {
 		return err

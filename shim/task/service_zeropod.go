@@ -261,15 +261,16 @@ func (w *wrapper) Exec(ctx context.Context, r *taskAPI.ExecProcessRequest) (*emp
 		return w.service.Exec(ctx, r)
 	}
 
+	scaledDown := zeropodContainer.AddExec(r.ExecID)
 	zeropodContainer.CancelScaleDown()
 
-	// restore it for exec in case we are scaled down
-	if zeropodContainer.ScaledDown() {
+	if scaledDown {
 		log.G(ctx).Printf("got exec for scaled down container, restoring")
 
-		if _, _, err := zeropodContainer.Restore(ctx); err != nil {
+		if _, _, err := zeropodContainer.Restore(ctx); err != nil && !errors.Is(err, zshim.ErrAlreadyRestored) {
 			if errors.Is(err, zshim.ErrNoCapacity) {
 				log.G(ctx).Info("no capacity to restore for exec")
+				w.execDone(zeropodContainer, r.ExecID)
 				return &emptypb.Empty{}, fmt.Errorf("no capacity to restore for exec")
 			}
 
@@ -284,7 +285,20 @@ func (w *wrapper) Exec(ctx context.Context, r *taskAPI.ExecProcessRequest) (*emp
 	// no-op unless dry-run is active and currently simulating scaled down
 	zeropodContainer.DryRunExec(ctx)
 
-	return w.service.Exec(ctx, r)
+	resp, err := w.service.Exec(ctx, r)
+	if err != nil {
+		w.execDone(zeropodContainer, r.ExecID)
+	}
+	return resp, err
+}
+
+// execDone stops tracking an exec and schedules a scale down if it was the
+// last one in flight.
+func (w *wrapper) execDone(c *zshim.Container, execID string) {
+	if c.RemoveExec(execID) > 0 {
+		return
+	}
+	c.ScheduleScaleDown()
 }
 
 func (w *wrapper) Pids(ctx context.Context, r *taskAPI.PidsRequest) (*taskAPI.PidsResponse, error) {
@@ -317,13 +331,7 @@ func (w *wrapper) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAP
 		zeropodContainer.Stop(ctx)
 		w.deleteZeropodContainer(r.ID)
 	} else {
-		w.lifecycleMu.Lock()
-		// on delete of an exec container we want to schedule scaling down again
-		// but only if there are no other running execs.
-		if w.runningExecs[zeropodContainer.Container] == 0 {
-			zeropodContainer.ScheduleScaleDown()
-		}
-		w.lifecycleMu.Unlock()
+		w.execDone(zeropodContainer, r.ExecID)
 	}
 	return w.service.Delete(ctx, r)
 }
@@ -481,6 +489,14 @@ func (w *wrapper) preventExit(cp containerProcess) bool {
 		// including when Start fails. Let the task service handle that exit.
 		initial := zeropodContainer.InitialProcess()
 		current := zeropodContainer.Process()
+
+		if initial != nil && current != nil && cp.Process.ID() == initial.ID() &&
+			cp.Process.Pid() != current.Pid() {
+			ctx := zshim.WithContainerLogger(w.context, cp.Container.ID)
+			log.G(ctx).Infof("not setting exited because process %v has been replaced by %v", cp.Process.Pid(), current.Pid())
+			return true
+		}
+
 		if initial != nil && (cp.Process.ID() == initial.ID() ||
 			(current != nil && cp.Process.ID() == current.ID())) {
 			initial.SetExited(0)
