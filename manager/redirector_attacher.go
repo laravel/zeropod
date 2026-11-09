@@ -255,6 +255,8 @@ func (r *Redirector) getSandboxPids() ([]int, error) {
 		}
 		return nil, err
 	}
+	//nolint:errcheck
+	defer f.Close()
 
 	dirs, err := f.Readdirnames(0)
 	if err != nil {

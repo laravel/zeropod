@@ -35,6 +35,8 @@ func (c *Container) updateCheckpointMemoryBytes() error {
 	if err != nil {
 		return err
 	}
+	//nolint:errcheck
+	defer imgDir.Close()
 	dumpStats, err := stats.CriuGetDumpStats(imgDir)
 	if err != nil {
 		return nil
