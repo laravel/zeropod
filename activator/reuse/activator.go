@@ -429,7 +429,6 @@ func IgnoreAddr(addrMap *ebpf.Map, ip string) error {
 }
 
 func (act *Activator) wake(network activator.Network) error {
-	closeProbe := false
 	if act.restoreHook != nil {
 		pid, err := act.restoreHook()
 		if err != nil {
@@ -438,7 +437,6 @@ func (act *Activator) wake(network activator.Network) error {
 		}
 		// TODO: should retoreHook return NoCapacity?
 		if pid != 0 {
-			closeProbe = true
 			before := time.Now()
 			act.register.Lock()
 			if !act.registeredWake.Load() {
@@ -448,8 +446,8 @@ func (act *Activator) wake(network activator.Network) error {
 					return err
 				}
 				act.registeredWake.Store(true)
-				act.register.Unlock()
 			}
+			act.register.Unlock()
 			act.log.Debugf("registered listeners in %s", time.Since(before))
 		}
 	}
@@ -457,9 +455,6 @@ func (act *Activator) wake(network activator.Network) error {
 	defer act.mu.Unlock()
 	for _, ln := range act.listeners {
 		ln.wake.closeListener()
-		if !closeProbe {
-			continue
-		}
 		ln.probe.closeListener()
 	}
 	// sk_reuseport/migrate only seems to migrate pending connections to the
@@ -486,6 +481,15 @@ func (act *Activator) poke(port uint16, network activator.Network) error {
 		}
 		return err
 	})
+}
+
+func (act *Activator) DisableRedirects() error {
+	act.mu.Lock()
+	defer act.mu.Unlock()
+	for _, ln := range act.listeners {
+		ln.probe.closeListener()
+	}
+	return nil
 }
 
 func (act *Activator) Reset() error {
