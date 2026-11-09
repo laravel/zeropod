@@ -481,6 +481,14 @@ func (w *wrapper) preventExit(cp containerProcess) bool {
 		// including when Start fails. Let the task service handle that exit.
 		initial := zeropodContainer.InitialProcess()
 		current := zeropodContainer.Process()
+
+		if initial != nil && current != nil && cp.Process.ID() == initial.ID() &&
+			cp.Process.Pid() != current.Pid() {
+			ctx := zshim.WithContainerLogger(w.context, cp.Container.ID)
+			log.G(ctx).Infof("not setting exited because process %v has been replaced by %v", cp.Process.Pid(), current.Pid())
+			return true
+		}
+
 		if initial != nil && (cp.Process.ID() == initial.ID() ||
 			(current != nil && cp.Process.ID() == current.ID())) {
 			initial.SetExited(0)
