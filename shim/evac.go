@@ -104,6 +104,8 @@ func (c *Container) evac(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("unable to create pipe: %w", err)
 	}
+	//nolint:errcheck
+	defer statusRead.Close()
 	errChan := make(chan error, 1)
 	lazyStarted := make(chan bool, 1)
 	done := make(chan bool, 1)
@@ -112,6 +114,8 @@ func (c *Container) evac(ctx context.Context) error {
 	var pausedAt time.Time
 	go waitForStatus(ctx, lazyStarted, errChan, statusRead)
 	go func(errChan chan error) {
+		//nolint:errcheck
+		defer statusWrite.Close()
 		pausedAt = time.Now()
 		if err := initProcess.Runtime().Checkpoint(
 			checkpointCtx, c.ID(), &runcC.CheckpointOpts{
@@ -186,9 +190,12 @@ func waitForStatus(ctx context.Context, done chan bool, errChan chan error, stat
 	log.G(ctx).Info("reading status file")
 	data := make([]byte, 1)
 	if _, err := status.Read(data); err != nil {
+		// EOF means criu exited without signalling lazy-pages readiness, the
+		// checkpoint goroutine reports that failure.
 		if err != io.EOF {
 			errChan <- err
 		}
+		return
 	}
 	log.G(ctx).Infof("read something: %s, we are done", data)
 	done <- true

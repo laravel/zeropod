@@ -666,9 +666,10 @@ func getRestoreStats(imageID string) (*stats.RestoreStatsEntry, error) {
 	if err != nil {
 		return nil, err
 	}
+	//nolint:errcheck
+	defer imgDir.Close()
 
 	return stats.CriuGetRestoreStats(imgDir)
-
 }
 
 func (ns *nodeService) findMatchingMigration(ctx context.Context, pod *corev1.Pod) (*v1.Migration, error) {
@@ -716,16 +717,19 @@ func (ns *nodeService) pullImage(ctx context.Context, nodeClient nodev1.NodeClie
 		return err
 	}
 
-	errs := make(chan error)
+	var extractErr error
+	extractDone := make(chan struct{})
 	transferredBytes := 0
 	r, w := io.Pipe()
-	//nolint:errcheck
-	defer w.Close()
+	defer func() {
+		_ = w.Close()
+		<-extractDone
+	}()
 	go func() {
-		defer close(errs)
-		if err := extract(ctx, id, r); err != nil {
-			errs <- err
-		}
+		defer close(extractDone)
+		extractErr = extract(ctx, id, r)
+		// unblocks pending writes if extract stopped reading early
+		r.CloseWithError(extractErr)
 	}()
 	for {
 		img, err := cl.Recv()
@@ -747,8 +751,9 @@ func (ns *nodeService) pullImage(ctx context.Context, nodeClient nodev1.NodeClie
 		default:
 		}
 	}
-	for err := range errs {
-		return err
+	<-extractDone
+	if extractErr != nil {
+		return extractErr
 	}
 
 	ns.log.Info("done pulling image",

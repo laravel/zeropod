@@ -428,6 +428,8 @@ func configureContainerdv1(ctx context.Context, runtime containerRuntime, contai
 	if err != nil {
 		return false, err
 	}
+	//nolint:errcheck
+	defer cfg.Close()
 
 	configured, containerdOptPath, err := optConfigured(ctx, containerdConfig)
 	if err != nil {
