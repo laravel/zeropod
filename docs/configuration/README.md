@@ -259,6 +259,10 @@ requests to the new one as soon as it's available.
   tracking.
 * **`-capacity-eviction-timeout`** (default `1m`, component `manager`): How long
   to wait for a pod eviction operation to complete before timing out.
+* **`-deny-deletion-restore`** (default `false`, component `manager`): Denies
+  capacity requests of containers whose pod is already being deleted. Requests
+  are forwarded to the new pod as soon as it's available instead of restoring
+  the container on the old one. Requires `-capacity-request`.
 
 ### Migration Settings
 

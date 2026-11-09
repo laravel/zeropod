@@ -224,8 +224,22 @@ func (c *Container) evacScaledDown(ctx context.Context) error {
 	if _, err := nodeClient.PrepareEvac(ctx, evacReq); err != nil {
 		return fmt.Errorf("requesting evac: %w", err)
 	}
-	c.prepareMigrateData(ctx)
 
+	// lock CheckpointRestore until the evac is done
+	c.CheckpointRestore.Lock()
+	defer c.CheckpointRestore.Unlock()
+
+	// container has been restored in the meantime, abort the evac
+	if !c.ScaledDown() {
+		if _, err := nodeClient.AbortEvac(ctx, evacReq); err != nil {
+			// if this fails, the restore will just take a bit longer to fail
+			// (migration servers timeout) so log it and move on
+			log.G(ctx).WithError(err).Error("aborting evac failed")
+		}
+		return fmt.Errorf("aborting evac as container was restored in the meantime")
+	}
+
+	c.prepareMigrateData(ctx)
 	if _, err := nodeClient.Evac(ctx, evacReq); err != nil {
 		return fmt.Errorf("requesting evac: %w", err)
 	}

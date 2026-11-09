@@ -9,6 +9,7 @@ option go_package = "github.com/laravel/zeropod/api/node/v1/;v1";
 
 service Node {
   rpc Evac(EvacRequest) returns (EvacResponse);
+  rpc AbortEvac(EvacRequest) returns (EvacResponse);
   rpc PrepareEvac(EvacRequest) returns (EvacResponse);
   rpc Restore(RestoreRequest) returns (RestoreResponse);
   rpc FinishRestore(RestoreRequest) returns (RestoreResponse);

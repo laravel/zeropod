@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/checkpoint-restore/go-criu/v8/stats"
@@ -77,10 +78,41 @@ type Timeouts struct {
 	PagesTransfer time.Duration
 }
 
+var DefaultTimeouts = Timeouts{
+	MigrationClaim:   10 * time.Second,
+	MigrationReady:   5 * time.Minute,
+	MigrationServers: 10 * time.Second,
+	EvictionTimeout:  time.Minute,
+	PagesTransfer:    5 * time.Minute,
+}
+
+// ServerOption is used for functional opts on the node server.
+type ServerOption func(*nodeService)
+
+func ServerTimeouts(timeouts Timeouts) ServerOption {
+	return func(ns *nodeService) {
+		ns.timeouts = timeouts
+	}
+}
+
+func CapacityTracker(cap capacity.Tracker) ServerOption {
+	return func(ns *nodeService) {
+		ns.cap = cap
+	}
+}
+
+// DenyDeletionRestore denies restoring containers of pods that are already
+// being deleted.
+func DenyDeletionRestore(deny bool) ServerOption {
+	return func(ns *nodeService) {
+		ns.denyDeletionRestore = deny
+	}
+}
+
 // NewServer starts a node server with two listeners:
 // * Unix socket for the shims to connect to it locally
 // * TCP+TLS socket to allow the other node instances to connect
-func NewServer(addr string, kube client.Client, log *slog.Logger, timeouts Timeouts, cap capacity.Tracker) (*Server, error) {
+func NewServer(addr string, kube client.Client, log *slog.Logger, opts ...ServerOption) (*Server, error) {
 	host, ok := os.LookupEnv(nodev1.PodIPEnvKey)
 	if !ok {
 		return nil, fmt.Errorf("could not find host, env POD_IP is not set")
@@ -117,7 +149,7 @@ func NewServer(addr string, kube client.Client, log *slog.Logger, timeouts Timeo
 		liveMigrationSupported = false
 	}
 
-	nodev1.RegisterNodeService(s, &nodeService{
+	ns := &nodeService{
 		kube:                   kube,
 		log:                    log.With("node", nodeName),
 		host:                   host,
@@ -126,16 +158,21 @@ func NewServer(addr string, kube client.Client, log *slog.Logger, timeouts Timeo
 		tlsConfig:              tlsConfig,
 		pageServerTLS:          true,
 		liveMigrationSupported: liveMigrationSupported,
-		timeouts:               timeouts,
-		cap:                    cap,
-	})
+		timeouts:               DefaultTimeouts,
+		cap:                    capacity.NewNoopTracker(),
+	}
+	for _, opt := range opts {
+		opt(ns)
+	}
+	nodev1.RegisterNodeService(s, ns)
 
 	log.Info("new node server",
 		"name", nodeName,
 		"live_migration_supported", liveMigrationSupported,
-		"capacity_tracker", reflect.TypeOf(cap).String(),
-		"eviction_threshold_cpu", cap.Threshold(corev1.ResourceCPU),
-		"eviction_threshold_memory", cap.Threshold(corev1.ResourceMemory),
+		"deny_deletion_restore", ns.denyDeletionRestore,
+		"capacity_tracker", reflect.TypeOf(ns.cap).String(),
+		"eviction_threshold_cpu", ns.cap.Threshold(corev1.ResourceCPU),
+		"eviction_threshold_memory", ns.cap.Threshold(corev1.ResourceMemory),
 	)
 	return &Server{
 		ttrpc:        s,
@@ -213,6 +250,43 @@ type nodeService struct {
 	liveMigrationSupported bool
 	timeouts               Timeouts
 	cap                    capacity.Tracker
+	evicted                evictedPods
+	denyDeletionRestore    bool
+}
+
+// evictedPods keeps track of pods that have been evicted by this node. This is
+// needed as the pod in the client cache might not reflect the deletion yet.
+type evictedPods struct {
+	mu   sync.Mutex
+	pods map[types.UID]time.Time
+}
+
+// add marks the pod as evicted and returns true if it was not already being
+// evicted. Entries older than ttl are pruned.
+func (e *evictedPods) add(pod *corev1.Pod, ttl time.Duration) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.pods == nil {
+		e.pods = map[types.UID]time.Time{}
+	}
+	for id, evictedAt := range e.pods {
+		if time.Since(evictedAt) > ttl {
+			delete(e.pods, id)
+		}
+	}
+	if _, ok := e.pods[pod.UID]; ok {
+		return false
+	}
+	e.pods[pod.UID] = time.Now()
+	return true
+}
+
+// contains returns true if the pod has been evicted within ttl.
+func (e *evictedPods) contains(pod *corev1.Pod, ttl time.Duration) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	evictedAt, ok := e.pods[pod.UID]
+	return ok && time.Since(evictedAt) <= ttl
 }
 
 var findMigrationBackoff = wait.Backoff{
@@ -237,6 +311,14 @@ func (ns *nodeService) RestoreCapacity(ctx context.Context, req *nodev1.RestoreC
 	if err := ns.kube.Get(ctx, client.ObjectKeyFromObject(pod), pod); err != nil {
 		return nil, err
 	}
+	if ns.denyDeletionRestore && !pod.DeletionTimestamp.IsZero() {
+		log.Info("pod is already being deleted, denying restore")
+		return ns.evictPod(ctx, req, pod)
+	}
+	if ns.evicted.contains(pod, ns.timeouts.EvictionTimeout) {
+		log.Info("pod is already being evicted, denying restore")
+		return ns.evictPod(ctx, req, pod)
+	}
 	res, err := getContainerResources(pod, req.PodInfo.ContainerName)
 	if err != nil {
 		if errors.Is(err, errEmptyRequests) {
@@ -259,12 +341,7 @@ func (ns *nodeService) RestoreCapacity(ctx context.Context, req *nodev1.RestoreC
 		)
 		return &nodev1.RestoreCapacityResponse{Allowed: true}, nil
 	}
-	resp, err := ns.evictPod(ctx, req, pod)
-	if err != nil {
-		log.Error("evicting pod", "error", err)
-		return &nodev1.RestoreCapacityResponse{Allowed: true}, fmt.Errorf("evicting pod: %w", err)
-	}
-	return resp, nil
+	return ns.evictPod(ctx, req, pod)
 }
 
 func (ns *nodeService) evictPod(ctx context.Context, req *nodev1.RestoreCapacityRequest, pod *corev1.Pod) (*nodev1.RestoreCapacityResponse, error) {
@@ -282,13 +359,17 @@ func (ns *nodeService) evictPod(ctx context.Context, req *nodev1.RestoreCapacity
 		}
 		return nil
 	}); err != nil {
-		return nil, err
+		log.Error("tainting node", "error", err)
+		return &nodev1.RestoreCapacityResponse{Allowed: true}, fmt.Errorf("evicting pod: tainting node: %w", err)
 	}
-	firstEviction := pod.DeletionTimestamp.IsZero()
+	// checked before deleting as we don't want to count pods that were already
+	// being deleted by someone else as evictions.
+	alreadyDeleting := !pod.DeletionTimestamp.IsZero()
 	if err := ns.kube.Delete(ctx, pod); err != nil {
-		return nil, err
+		log.Error("deleting pod", "error", err)
+		return &nodev1.RestoreCapacityResponse{Allowed: true}, fmt.Errorf("evicting pod: %w", err)
 	}
-	if firstEviction {
+	if firstEviction := ns.evicted.add(pod, ns.timeouts.EvictionTimeout); firstEviction && !alreadyDeleting {
 		ns.cap.IncEvicted()
 	}
 	if !shimv1.AnyMigrationEnabled(pod.Annotations) {
@@ -314,6 +395,10 @@ func (ns *nodeService) evictPod(ctx context.Context, req *nodev1.RestoreCapacity
 			return false, err
 		}
 		if migration.Spec.TargetPodIP != "" {
+			return true, nil
+		}
+		if migrationFinal(migration, req.PodInfo.ContainerName) {
+			log.Info("migration is final without target pod IP, stopping wait")
 			return true, nil
 		}
 		return false, nil
@@ -400,13 +485,7 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 		return nil, fmt.Errorf("timeout waiting for matching migration: %w", err)
 	}
 	log.Info("found matching migration", "name", migration.Name)
-	if slices.ContainsFunc(
-		migration.Status.Containers,
-		func(container v1.MigrationContainerStatus) bool {
-			return container.Name == req.PodInfo.ContainerName &&
-				container.Condition.Phase == v1.MigrationPhaseFailed
-		},
-	) {
+	if migrationFailed(migration, req.PodInfo.ContainerName) {
 		log.Warn("matching migration is set to failed, aborting restore")
 		return nil, fmt.Errorf("matching migration is set to failed")
 	}
@@ -429,6 +508,10 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 		if err := ns.kube.Get(ctx, client.ObjectKeyFromObject(migration), migration); err != nil {
 			return false, err
 		}
+		if migrationFailed(migration, req.PodInfo.ContainerName) {
+			return true, nil
+		}
+
 		for _, ctr := range migration.Spec.Containers {
 			if ctr.Name == req.PodInfo.ContainerName {
 				if (migration.Spec.LiveMigration && ctr.PageServer != nil && ctr.ImageServer != nil) ||
@@ -440,9 +523,14 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 		}
 		return false, nil
 	}); err != nil {
-		ns.setMigrationFailed(ctx, req.PodInfo.ContainerName, migration)
+		_ = ns.setMigrationFailed(ctx, req.PodInfo.ContainerName, migration)
 		log.Error("migration servers unset", "container_name", req.PodInfo.ContainerName)
 		return nil, fmt.Errorf("migration servers are not set on migration: %s", migration.Name)
+	}
+
+	if migrationFailed(migration, req.PodInfo.ContainerName) {
+		log.Warn("matching migration is set to failed, aborting restore")
+		return nil, fmt.Errorf("matching migration is set to failed")
 	}
 
 	log.Info("done waiting for migration servers", "container_name", req.PodInfo.ContainerName)
@@ -467,7 +555,7 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 	}
 	if migration.Spec.LiveMigration {
 		if !ns.liveMigrationSupported {
-			ns.setMigrationFailed(ctx, req.PodInfo.ContainerName, migration)
+			_ = ns.setMigrationFailed(ctx, req.PodInfo.ContainerName, migration)
 			log.Error(ErrLiveMigrationNotSupported.Error())
 			return nil, ErrLiveMigrationNotSupported
 		}
@@ -493,7 +581,7 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 	}, nil
 }
 
-func (ns *nodeService) setMigrationFailed(ctx context.Context, containerName string, migration *v1.Migration) {
+func (ns *nodeService) setMigrationFailed(ctx context.Context, containerName string, migration *v1.Migration) error {
 	if err := ns.updateMigrationStatus(ctx, client.ObjectKeyFromObject(migration), func(m *v1.Migration) (bool, error) {
 		setOrUpdateContainerStatus(m, containerName, func(status *v1.MigrationContainerStatus) {
 			status.Condition.Phase = v1.MigrationPhaseFailed
@@ -501,7 +589,9 @@ func (ns *nodeService) setMigrationFailed(ctx context.Context, containerName str
 		return true, nil
 	}); err != nil {
 		ns.log.Error("failed to update migration status", "container_name", containerName)
+		return err
 	}
+	return nil
 }
 
 func (ns *nodeService) FinishRestore(ctx context.Context, req *nodev1.RestoreRequest) (*nodev1.RestoreResponse, error) {
@@ -860,6 +950,24 @@ func (ns *nodeService) Evac(ctx context.Context, req *nodev1.EvacRequest) (*node
 	return &nodev1.EvacResponse{}, nil
 }
 
+// AbortEvac aborts a migration of a specific container by setting it as failed.
+func (ns *nodeService) AbortEvac(ctx context.Context, req *nodev1.EvacRequest) (*nodev1.EvacResponse, error) {
+	migration := &v1.Migration{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      req.PodInfo.Name,
+			Namespace: req.PodInfo.Namespace,
+		},
+	}
+	log := ns.log.With("pod_name", req.PodInfo.Name,
+		"namespace", req.PodInfo.Namespace,
+		"container_name", req.PodInfo.ContainerName)
+	log.Info("got evac abort, updating migration to failed")
+	if err := ns.kube.Get(ctx, client.ObjectKeyFromObject(migration), migration); err != nil {
+		return &nodev1.EvacResponse{}, err
+	}
+	return &nodev1.EvacResponse{}, ns.setMigrationFailed(ctx, req.PodInfo.ContainerName, migration)
+}
+
 func (ns *nodeService) NewCriuLazyPages(ctx context.Context, r *nodev1.CriuLazyPagesRequest) (*emptypb.Empty, error) {
 	// the criu lazy-pages daemon would be able to connect directly to the page
 	// server via TLS but in testing this has been proven to work very
@@ -1070,4 +1178,24 @@ func setOrUpdateContainerStatus(migration *v1.Migration, containerName string, u
 // on certain events and calls the condition immediately.
 func pollUntilContextCancel(ctx context.Context, condition wait.ConditionWithContextFunc) error {
 	return wait.PollUntilContextCancel(ctx, time.Millisecond*10, true, condition)
+}
+
+func migrationFinal(migration *v1.Migration, containerName string) bool {
+	return slices.ContainsFunc(
+		migration.Status.Containers,
+		func(container v1.MigrationContainerStatus) bool {
+			return container.Name == containerName &&
+				container.Condition.Phase.Final()
+		},
+	)
+}
+
+func migrationFailed(migration *v1.Migration, containerName string) bool {
+	return slices.ContainsFunc(
+		migration.Status.Containers,
+		func(container v1.MigrationContainerStatus) bool {
+			return container.Name == containerName &&
+				container.Condition.Phase == v1.MigrationPhaseFailed
+		},
+	)
 }

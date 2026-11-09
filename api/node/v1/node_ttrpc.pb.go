@@ -10,6 +10,7 @@ import (
 
 type NodeService interface {
 	Evac(context.Context, *EvacRequest) (*EvacResponse, error)
+	AbortEvac(context.Context, *EvacRequest) (*EvacResponse, error)
 	PrepareEvac(context.Context, *EvacRequest) (*EvacResponse, error)
 	Restore(context.Context, *RestoreRequest) (*RestoreResponse, error)
 	FinishRestore(context.Context, *RestoreRequest) (*RestoreResponse, error)
@@ -40,6 +41,13 @@ func RegisterNodeService(srv *ttrpc.Server, svc NodeService) {
 					return nil, err
 				}
 				return svc.Evac(ctx, &req)
+			},
+			"AbortEvac": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
+				var req EvacRequest
+				if err := unmarshal(&req); err != nil {
+					return nil, err
+				}
+				return svc.AbortEvac(ctx, &req)
 			},
 			"PrepareEvac": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
 				var req EvacRequest
@@ -95,6 +103,7 @@ func RegisterNodeService(srv *ttrpc.Server, svc NodeService) {
 
 type NodeClient interface {
 	Evac(context.Context, *EvacRequest) (*EvacResponse, error)
+	AbortEvac(context.Context, *EvacRequest) (*EvacResponse, error)
 	PrepareEvac(context.Context, *EvacRequest) (*EvacResponse, error)
 	Restore(context.Context, *RestoreRequest) (*RestoreResponse, error)
 	FinishRestore(context.Context, *RestoreRequest) (*RestoreResponse, error)
@@ -116,6 +125,14 @@ func NewNodeClient(client *ttrpc.Client) NodeClient {
 func (c *nodeClient) Evac(ctx context.Context, req *EvacRequest) (*EvacResponse, error) {
 	var resp EvacResponse
 	if err := c.client.Call(ctx, "zeropod.node.v1.Node", "Evac", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *nodeClient) AbortEvac(ctx context.Context, req *EvacRequest) (*EvacResponse, error) {
+	var resp EvacResponse
+	if err := c.client.Call(ctx, "zeropod.node.v1.Node", "AbortEvac", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
