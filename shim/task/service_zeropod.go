@@ -71,6 +71,7 @@ func NewZeropodService(ctx context.Context, publisher shim.Publisher, sd shutdow
 		zeropodContainers: make(map[string]*zshim.Container),
 		zeropodEvents:     make(chan *v1.ContainerStatus, 128),
 		exitChan:          reaper.Default.Subscribe(),
+		shimLog:           newShimLog(),
 	}
 
 	go w.processExits()
@@ -115,6 +116,7 @@ type wrapper struct {
 	zeropodContainers map[string]*zshim.Container
 	zeropodEvents     chan *v1.ContainerStatus
 	exitChan          chan runcC.Exit
+	shimLog           *shimLog
 }
 
 func (w *wrapper) RegisterTTRPC(server *ttrpc.Server) error {
@@ -299,6 +301,9 @@ func (w *wrapper) Pids(ctx context.Context, r *taskAPI.PidsRequest) (*taskAPI.Pi
 
 func (w *wrapper) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAPI.DeleteResponse, error) {
 	log.G(ctx).Info("delete called")
+	if r.ExecID == "" {
+		w.moveShimLog(ctx, r.ID)
+	}
 	zeropodContainer, ok := w.getZeropodContainer(r.ID)
 	if !ok {
 		if err := w.cleanSandboxPin(ctx, r); err != nil {
@@ -321,6 +326,29 @@ func (w *wrapper) Delete(ctx context.Context, r *taskAPI.DeleteRequest) (*taskAP
 		w.lifecycleMu.Unlock()
 	}
 	return w.service.Delete(ctx, r)
+}
+
+// moveShimLog has to be called before the delete call returns as containerd
+// closes the log fifo of the bundle afterwards.
+func (w *wrapper) moveShimLog(ctx context.Context, id string) {
+	if w.shimLog == nil {
+		return
+	}
+	w.mu.Lock()
+	container, ok := w.containers[id]
+	var candidates []string
+	for _, c := range w.containers {
+		if c.ID != id {
+			candidates = append(candidates, c.Bundle)
+		}
+	}
+	w.mu.Unlock()
+	if !ok {
+		return
+	}
+	if err := w.shimLog.moveFrom(container.Bundle, candidates); err != nil {
+		log.G(ctx).WithError(err).Warn("moving shim log to remaining task")
+	}
 }
 
 // Update a running container
