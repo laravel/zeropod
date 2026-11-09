@@ -1,13 +1,20 @@
 package shim
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 
+	"github.com/containerd/log"
 	v1 "github.com/laravel/zeropod/api/shim/v1"
 )
+
+// WithContainerLogger adds the container ID to the logger of the context.
+func WithContainerLogger(ctx context.Context, id string) context.Context {
+	return log.WithLogger(ctx, log.G(ctx).WithField("container", id))
+}
 
 // getLogPath gets the log path of the container by searching for the last log
 // file in the CRI pod log path.

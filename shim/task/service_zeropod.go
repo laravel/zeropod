@@ -471,7 +471,8 @@ func (w *wrapper) preventExit(cp containerProcess) bool {
 		zeropodContainer.CheckpointRestore.Lock()
 		defer zeropodContainer.CheckpointRestore.Unlock()
 		if zeropodContainer.ScaledDown() {
-			log.G(w.context).Infof("not setting exited because process has scaled down: %v", cp.Process.Pid())
+			ctx := zshim.WithContainerLogger(w.context, cp.Container.ID)
+			log.G(ctx).Infof("not setting exited because process has scaled down: %v", cp.Process.Pid())
 			return true
 		}
 
