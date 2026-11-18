@@ -258,6 +258,7 @@ func (act *Activator) Start(ctx context.Context, pid int, listeners activator.Li
 		}
 		act.log.Debugf("registered listeners in %s", time.Since(before))
 	}
+	act.log.Infof("activator listeners: %s", activator.Listeners(act.GetListeners(ctx, pid)))
 
 	act.started.Store(true)
 	return act.initSocketTracker()
@@ -525,6 +526,8 @@ func (act *Activator) Reset() error {
 }
 
 func (act *Activator) GetListeners(_ context.Context, _ int) []activator.Listener {
+	act.mu.Lock()
+	defer act.mu.Unlock()
 	listeners := make([]activator.Listener, 0, len(act.listeners))
 	for k, l := range act.listeners {
 		listeners = append(listeners, activator.Listener{
