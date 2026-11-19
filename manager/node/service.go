@@ -30,6 +30,8 @@ import (
 	"github.com/laravel/zeropod/manager"
 	"github.com/laravel/zeropod/manager/capacity"
 	"github.com/mholt/archives"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -66,6 +68,7 @@ type Server struct {
 	unixListener *net.UnixListener
 	listener     net.Listener
 	ttrpc        *ttrpc.Server
+	grpc         *grpc.Server
 	kube         client.Client
 	log          *slog.Logger
 }
@@ -110,8 +113,8 @@ func DenyDeletionRestore(deny bool) ServerOption {
 }
 
 // NewServer starts a node server with two listeners:
-// * Unix socket for the shims to connect to it locally
-// * TCP+TLS socket to allow the other node instances to connect
+// * Unix socket serving ttrpc for the shims to connect to it locally
+// * TCP+TLS socket serving gRPC to allow the other node instances to connect
 func NewServer(addr string, kube client.Client, log *slog.Logger, opts ...ServerOption) (*Server, error) {
 	host, ok := os.LookupEnv(nodev1.PodIPEnvKey)
 	if !ok {
@@ -123,7 +126,7 @@ func NewServer(addr string, kube client.Client, log *slog.Logger, opts ...Server
 		return nil, fmt.Errorf("initializing TLS certificates: %w", err)
 	}
 
-	listener, err := tls.Listen("tcp", addr, tlsConfig)
+	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("creating net listener: %w", err)
 	}
@@ -165,6 +168,8 @@ func NewServer(addr string, kube client.Client, log *slog.Logger, opts ...Server
 		opt(ns)
 	}
 	nodev1.RegisterNodeService(s, ns)
+	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)))
+	nodev1.RegisterImageServiceServer(grpcServer, ns)
 
 	log.Info("new node server",
 		"name", nodeName,
@@ -176,6 +181,7 @@ func NewServer(addr string, kube client.Client, log *slog.Logger, opts ...Server
 	)
 	return &Server{
 		ttrpc:        s,
+		grpc:         grpcServer,
 		unixListener: unixListener,
 		listener:     listener,
 		kube:         kube,
@@ -216,8 +222,8 @@ func setupUnixListener() (*net.UnixListener, error) {
 func (s *Server) Start(ctx context.Context) {
 	defer func() {
 		_ = s.ttrpc.Close()
+		s.grpc.Stop()
 		_ = s.unixListener.Close()
-		_ = s.listener.Close()
 		_ = os.Remove(nodeSocketAddress())
 	}()
 	go func() {
@@ -226,8 +232,8 @@ func (s *Server) Start(ctx context.Context) {
 		}
 	}()
 	go func() {
-		if err := s.ttrpc.Serve(ctx, s.listener); err != nil {
-			s.log.Error("serving ttrpc listener", "error", err)
+		if err := s.grpc.Serve(s.listener); err != nil {
+			s.log.Error("serving grpc listener", "error", err)
 		}
 	}()
 
@@ -240,6 +246,7 @@ func (s *Server) Start(ctx context.Context) {
 // nodeService is a central RPC service running once per zeropod-node. It
 // facilitates pod migration requests.
 type nodeService struct {
+	nodev1.UnimplementedImageServiceServer
 	kube                   client.Client
 	log                    *slog.Logger
 	host                   string
@@ -536,14 +543,16 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 	log.Info("done waiting for migration servers", "container_name", req.PodInfo.ContainerName)
 
 	if !ns.local(container.ImageServer.Host) {
-		conn, err := tls.Dial("tcp", container.ImageServer.Address(), ns.tlsConfig)
+		conn, err := grpc.NewClient(container.ImageServer.Address(),
+			grpc.WithTransportCredentials(credentials.NewTLS(ns.tlsConfig)))
 		if err != nil {
-			return nil, fmt.Errorf("dialing node service: %w", err)
+			return nil, fmt.Errorf("creating image service client: %w", err)
 		}
-		nodeClient := nodev1.NewNodeClient(ttrpc.NewClient(conn))
 		log.Info("pulling image as it's not local",
 			"remote_host", container.ImageServer.Host, "remote_port", container.ImageServer.Port)
-		if err := ns.pullImage(ctx, nodeClient, container.ID); err != nil {
+		err = ns.pullImage(ctx, nodev1.NewImageServiceClient(conn), container.ID)
+		_ = conn.Close()
+		if err != nil {
 			log.Error("pulling image", "error", err)
 			return nil, err
 		}
@@ -710,9 +719,11 @@ func (ns *nodeService) findMatchingMigration(ctx context.Context, pod *corev1.Po
 	return migration, nil
 }
 
-func (ns *nodeService) pullImage(ctx context.Context, nodeClient nodev1.NodeClient, id string) error {
+func (ns *nodeService) pullImage(ctx context.Context, imageClient nodev1.ImageServiceClient, id string) error {
 	beforePull := time.Now()
-	cl, err := nodeClient.PullImage(ctx, &nodev1.PullImageRequest{ImageId: id})
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cl, err := imageClient.PullImage(ctx, &nodev1.PullImageRequest{ImageId: id})
 	if err != nil {
 		return err
 	}
@@ -1027,7 +1038,8 @@ func (ns *nodeService) NewCriuLazyPages(ctx context.Context, r *nodev1.CriuLazyP
 var imageIDRegexp = regexp.MustCompile("^[A-Fa-f0-9]{64}$")
 
 // PullImage allows the caller to pull a compressed image from the server
-func (ns *nodeService) PullImage(ctx context.Context, req *nodev1.PullImageRequest, imageStream nodev1.Node_PullImageServer) error {
+func (ns *nodeService) PullImage(req *nodev1.PullImageRequest, imageStream grpc.ServerStreamingServer[nodev1.Image]) error {
+	ctx := imageStream.Context()
 	log := ns.log.With("image_id", req.ImageId)
 	log.Info("got pull image request")
 	if !imageIDRegexp.MatchString(req.ImageId) {
@@ -1049,8 +1061,10 @@ func (ns *nodeService) PullImage(ctx context.Context, req *nodev1.PullImageReque
 	// split our image into 64KiB chunks
 	const chunkSize = 64 * 1024
 
-	errChan := make(chan error)
+	errChan := make(chan error, 1)
 	r, w := io.Pipe()
+	// unblocks the archiver if we return early
+	defer r.Close()
 	archive := func() {
 		defer close(errChan)
 		//nolint:errcheck
