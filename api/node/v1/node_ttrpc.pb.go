@@ -5,7 +5,6 @@ package v1
 import (
 	context "context"
 	ttrpc "github.com/containerd/ttrpc"
-	emptypb "google.golang.org/protobuf/types/known/emptypb"
 )
 
 type NodeService interface {
@@ -14,7 +13,6 @@ type NodeService interface {
 	PrepareEvac(context.Context, *EvacRequest) (*EvacResponse, error)
 	Restore(context.Context, *RestoreRequest) (*RestoreResponse, error)
 	FinishRestore(context.Context, *RestoreRequest) (*RestoreResponse, error)
-	NewCriuLazyPages(context.Context, *CriuLazyPagesRequest) (*emptypb.Empty, error)
 	RestoreCapacity(context.Context, *RestoreCapacityRequest) (*RestoreCapacityResponse, error)
 }
 
@@ -55,13 +53,6 @@ func RegisterNodeService(srv *ttrpc.Server, svc NodeService) {
 					return nil, err
 				}
 				return svc.FinishRestore(ctx, &req)
-			},
-			"NewCriuLazyPages": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
-				var req CriuLazyPagesRequest
-				if err := unmarshal(&req); err != nil {
-					return nil, err
-				}
-				return svc.NewCriuLazyPages(ctx, &req)
 			},
 			"RestoreCapacity": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
 				var req RestoreCapacityRequest
@@ -119,14 +110,6 @@ func (c *nodeClient) Restore(ctx context.Context, req *RestoreRequest) (*Restore
 func (c *nodeClient) FinishRestore(ctx context.Context, req *RestoreRequest) (*RestoreResponse, error) {
 	var resp RestoreResponse
 	if err := c.client.Call(ctx, "zeropod.node.v1.Node", "FinishRestore", req, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
-}
-
-func (c *nodeClient) NewCriuLazyPages(ctx context.Context, req *CriuLazyPagesRequest) (*emptypb.Empty, error) {
-	var resp emptypb.Empty
-	if err := c.client.Call(ctx, "zeropod.node.v1.Node", "NewCriuLazyPages", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil

@@ -383,74 +383,6 @@ func (x *MigrationInfo) GetPorts() []int32 {
 	return nil
 }
 
-type CriuLazyPagesRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	CheckpointPath string                 `protobuf:"bytes,1,opt,name=checkpoint_path,json=checkpointPath,proto3" json:"checkpoint_path,omitempty"`
-	Address        string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`
-	Port           int32                  `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
-	Tls            bool                   `protobuf:"varint,4,opt,name=tls,proto3" json:"tls,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
-}
-
-func (x *CriuLazyPagesRequest) Reset() {
-	*x = CriuLazyPagesRequest{}
-	mi := &file_node_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CriuLazyPagesRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CriuLazyPagesRequest) ProtoMessage() {}
-
-func (x *CriuLazyPagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CriuLazyPagesRequest.ProtoReflect.Descriptor instead.
-func (*CriuLazyPagesRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *CriuLazyPagesRequest) GetCheckpointPath() string {
-	if x != nil {
-		return x.CheckpointPath
-	}
-	return ""
-}
-
-func (x *CriuLazyPagesRequest) GetAddress() string {
-	if x != nil {
-		return x.Address
-	}
-	return ""
-}
-
-func (x *CriuLazyPagesRequest) GetPort() int32 {
-	if x != nil {
-		return x.Port
-	}
-	return 0
-}
-
-func (x *CriuLazyPagesRequest) GetTls() bool {
-	if x != nil {
-		return x.Tls
-	}
-	return false
-}
-
 type RestoreCapacityRequest struct {
 	state                 protoimpl.MessageState `protogen:"open.v1"`
 	PodInfo               *PodInfo               `protobuf:"bytes,1,opt,name=pod_info,json=podInfo,proto3" json:"pod_info,omitempty"`
@@ -461,7 +393,7 @@ type RestoreCapacityRequest struct {
 
 func (x *RestoreCapacityRequest) Reset() {
 	*x = RestoreCapacityRequest{}
-	mi := &file_node_proto_msgTypes[7]
+	mi := &file_node_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -473,7 +405,7 @@ func (x *RestoreCapacityRequest) String() string {
 func (*RestoreCapacityRequest) ProtoMessage() {}
 
 func (x *RestoreCapacityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[7]
+	mi := &file_node_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -486,7 +418,7 @@ func (x *RestoreCapacityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreCapacityRequest.ProtoReflect.Descriptor instead.
 func (*RestoreCapacityRequest) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{7}
+	return file_node_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RestoreCapacityRequest) GetPodInfo() *PodInfo {
@@ -513,7 +445,7 @@ type RestoreCapacityResponse struct {
 
 func (x *RestoreCapacityResponse) Reset() {
 	*x = RestoreCapacityResponse{}
-	mi := &file_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -525,7 +457,7 @@ func (x *RestoreCapacityResponse) String() string {
 func (*RestoreCapacityResponse) ProtoMessage() {}
 
 func (x *RestoreCapacityResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_node_proto_msgTypes[8]
+	mi := &file_node_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -538,7 +470,7 @@ func (x *RestoreCapacityResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RestoreCapacityResponse.ProtoReflect.Descriptor instead.
 func (*RestoreCapacityResponse) Descriptor() ([]byte, []int) {
-	return file_node_proto_rawDescGZIP(), []int{8}
+	return file_node_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RestoreCapacityResponse) GetAllowed() bool {
@@ -586,25 +518,19 @@ const file_node_proto_rawDesc = "" +
 	"\rrestore_start\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\frestoreStart\x12;\n" +
 	"\vrestore_end\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"restoreEnd\x12\x14\n" +
-	"\x05ports\x18\a \x03(\x05R\x05ports\"\x7f\n" +
-	"\x14CriuLazyPagesRequest\x12'\n" +
-	"\x0fcheckpoint_path\x18\x01 \x01(\tR\x0echeckpointPath\x12\x18\n" +
-	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x12\n" +
-	"\x04port\x18\x03 \x01(\x05R\x04port\x12\x10\n" +
-	"\x03tls\x18\x04 \x01(\bR\x03tls\"\x85\x01\n" +
+	"\x05ports\x18\a \x03(\x05R\x05ports\"\x85\x01\n" +
 	"\x16RestoreCapacityRequest\x123\n" +
 	"\bpod_info\x18\x01 \x01(\v2\x18.zeropod.node.v1.PodInfoR\apodInfo\x126\n" +
 	"\x17checkpoint_memory_bytes\x18\x03 \x01(\x04R\x15checkpointMemoryBytes\"X\n" +
 	"\x17RestoreCapacityResponse\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12#\n" +
-	"\rredirect_addr\x18\x02 \x01(\tR\fredirectAddr2\xbc\x04\n" +
+	"\rredirect_addr\x18\x02 \x01(\tR\fredirectAddr2\xe9\x03\n" +
 	"\x04Node\x12C\n" +
 	"\x04Evac\x12\x1c.zeropod.node.v1.EvacRequest\x1a\x1d.zeropod.node.v1.EvacResponse\x12H\n" +
 	"\tAbortEvac\x12\x1c.zeropod.node.v1.EvacRequest\x1a\x1d.zeropod.node.v1.EvacResponse\x12J\n" +
 	"\vPrepareEvac\x12\x1c.zeropod.node.v1.EvacRequest\x1a\x1d.zeropod.node.v1.EvacResponse\x12L\n" +
 	"\aRestore\x12\x1f.zeropod.node.v1.RestoreRequest\x1a .zeropod.node.v1.RestoreResponse\x12R\n" +
-	"\rFinishRestore\x12\x1f.zeropod.node.v1.RestoreRequest\x1a .zeropod.node.v1.RestoreResponse\x12Q\n" +
-	"\x10NewCriuLazyPages\x12%.zeropod.node.v1.CriuLazyPagesRequest\x1a\x16.google.protobuf.Empty\x12d\n" +
+	"\rFinishRestore\x12\x1f.zeropod.node.v1.RestoreRequest\x1a .zeropod.node.v1.RestoreResponse\x12d\n" +
 	"\x0fRestoreCapacity\x12'.zeropod.node.v1.RestoreCapacityRequest\x1a(.zeropod.node.v1.RestoreCapacityResponseB,Z*github.com/laravel/zeropod/api/node/v1/;v1b\x06proto3"
 
 var (
@@ -619,7 +545,7 @@ func file_node_proto_rawDescGZIP() []byte {
 	return file_node_proto_rawDescData
 }
 
-var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_node_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_node_proto_goTypes = []any{
 	(*EvacRequest)(nil),             // 0: zeropod.node.v1.EvacRequest
 	(*EvacResponse)(nil),            // 1: zeropod.node.v1.EvacResponse
@@ -627,39 +553,36 @@ var file_node_proto_goTypes = []any{
 	(*RestoreResponse)(nil),         // 3: zeropod.node.v1.RestoreResponse
 	(*PodInfo)(nil),                 // 4: zeropod.node.v1.PodInfo
 	(*MigrationInfo)(nil),           // 5: zeropod.node.v1.MigrationInfo
-	(*CriuLazyPagesRequest)(nil),    // 6: zeropod.node.v1.CriuLazyPagesRequest
-	(*RestoreCapacityRequest)(nil),  // 7: zeropod.node.v1.RestoreCapacityRequest
-	(*RestoreCapacityResponse)(nil), // 8: zeropod.node.v1.RestoreCapacityResponse
-	(*emptypb.Empty)(nil),           // 9: google.protobuf.Empty
-	(*timestamppb.Timestamp)(nil),   // 10: google.protobuf.Timestamp
+	(*RestoreCapacityRequest)(nil),  // 6: zeropod.node.v1.RestoreCapacityRequest
+	(*RestoreCapacityResponse)(nil), // 7: zeropod.node.v1.RestoreCapacityResponse
+	(*emptypb.Empty)(nil),           // 8: google.protobuf.Empty
+	(*timestamppb.Timestamp)(nil),   // 9: google.protobuf.Timestamp
 }
 var file_node_proto_depIdxs = []int32{
 	4,  // 0: zeropod.node.v1.EvacRequest.pod_info:type_name -> zeropod.node.v1.PodInfo
 	5,  // 1: zeropod.node.v1.EvacRequest.migration_info:type_name -> zeropod.node.v1.MigrationInfo
-	9,  // 2: zeropod.node.v1.EvacResponse.empty:type_name -> google.protobuf.Empty
+	8,  // 2: zeropod.node.v1.EvacResponse.empty:type_name -> google.protobuf.Empty
 	4,  // 3: zeropod.node.v1.RestoreRequest.pod_info:type_name -> zeropod.node.v1.PodInfo
 	5,  // 4: zeropod.node.v1.RestoreRequest.migration_info:type_name -> zeropod.node.v1.MigrationInfo
 	5,  // 5: zeropod.node.v1.RestoreResponse.migration_info:type_name -> zeropod.node.v1.MigrationInfo
-	10, // 6: zeropod.node.v1.MigrationInfo.paused_at:type_name -> google.protobuf.Timestamp
-	10, // 7: zeropod.node.v1.MigrationInfo.restore_start:type_name -> google.protobuf.Timestamp
-	10, // 8: zeropod.node.v1.MigrationInfo.restore_end:type_name -> google.protobuf.Timestamp
+	9,  // 6: zeropod.node.v1.MigrationInfo.paused_at:type_name -> google.protobuf.Timestamp
+	9,  // 7: zeropod.node.v1.MigrationInfo.restore_start:type_name -> google.protobuf.Timestamp
+	9,  // 8: zeropod.node.v1.MigrationInfo.restore_end:type_name -> google.protobuf.Timestamp
 	4,  // 9: zeropod.node.v1.RestoreCapacityRequest.pod_info:type_name -> zeropod.node.v1.PodInfo
 	0,  // 10: zeropod.node.v1.Node.Evac:input_type -> zeropod.node.v1.EvacRequest
 	0,  // 11: zeropod.node.v1.Node.AbortEvac:input_type -> zeropod.node.v1.EvacRequest
 	0,  // 12: zeropod.node.v1.Node.PrepareEvac:input_type -> zeropod.node.v1.EvacRequest
 	2,  // 13: zeropod.node.v1.Node.Restore:input_type -> zeropod.node.v1.RestoreRequest
 	2,  // 14: zeropod.node.v1.Node.FinishRestore:input_type -> zeropod.node.v1.RestoreRequest
-	6,  // 15: zeropod.node.v1.Node.NewCriuLazyPages:input_type -> zeropod.node.v1.CriuLazyPagesRequest
-	7,  // 16: zeropod.node.v1.Node.RestoreCapacity:input_type -> zeropod.node.v1.RestoreCapacityRequest
-	1,  // 17: zeropod.node.v1.Node.Evac:output_type -> zeropod.node.v1.EvacResponse
-	1,  // 18: zeropod.node.v1.Node.AbortEvac:output_type -> zeropod.node.v1.EvacResponse
-	1,  // 19: zeropod.node.v1.Node.PrepareEvac:output_type -> zeropod.node.v1.EvacResponse
-	3,  // 20: zeropod.node.v1.Node.Restore:output_type -> zeropod.node.v1.RestoreResponse
-	3,  // 21: zeropod.node.v1.Node.FinishRestore:output_type -> zeropod.node.v1.RestoreResponse
-	9,  // 22: zeropod.node.v1.Node.NewCriuLazyPages:output_type -> google.protobuf.Empty
-	8,  // 23: zeropod.node.v1.Node.RestoreCapacity:output_type -> zeropod.node.v1.RestoreCapacityResponse
-	17, // [17:24] is the sub-list for method output_type
-	10, // [10:17] is the sub-list for method input_type
+	6,  // 15: zeropod.node.v1.Node.RestoreCapacity:input_type -> zeropod.node.v1.RestoreCapacityRequest
+	1,  // 16: zeropod.node.v1.Node.Evac:output_type -> zeropod.node.v1.EvacResponse
+	1,  // 17: zeropod.node.v1.Node.AbortEvac:output_type -> zeropod.node.v1.EvacResponse
+	1,  // 18: zeropod.node.v1.Node.PrepareEvac:output_type -> zeropod.node.v1.EvacResponse
+	3,  // 19: zeropod.node.v1.Node.Restore:output_type -> zeropod.node.v1.RestoreResponse
+	3,  // 20: zeropod.node.v1.Node.FinishRestore:output_type -> zeropod.node.v1.RestoreResponse
+	7,  // 21: zeropod.node.v1.Node.RestoreCapacity:output_type -> zeropod.node.v1.RestoreCapacityResponse
+	16, // [16:22] is the sub-list for method output_type
+	10, // [10:16] is the sub-list for method input_type
 	10, // [10:10] is the sub-list for extension type_name
 	10, // [10:10] is the sub-list for extension extendee
 	0,  // [0:10] is the sub-list for field type_name
@@ -676,7 +599,7 @@ func file_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_node_proto_rawDesc), len(file_node_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
