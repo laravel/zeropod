@@ -77,10 +77,12 @@ func initTLS(host string) (*tls.Config, error) {
 
 	caCertPool := x509.NewCertPool()
 	caCertPool.AddCert(ca)
-	return serverTLSConfig(caCertPool, cert), nil
+	return ServerTLSConfig(caCertPool, cert), nil
 }
 
-func serverTLSConfig(ca *x509.CertPool, cert tls.Certificate) *tls.Config {
+// ServerTLSConfig returns the mTLS config used by the node services, both as
+// server and as client.
+func ServerTLSConfig(ca *x509.CertPool, cert tls.Certificate) *tls.Config {
 	return &tls.Config{
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		ClientCAs:    ca,

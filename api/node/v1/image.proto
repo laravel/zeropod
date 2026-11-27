@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package zeropod.node.v1;
+
+option go_package = "github.com/laravel/zeropod/api/node/v1/;v1";
+
+// ImageService is served over gRPC instead of ttrpc as it relies on HTTP/2
+// flow control: ttrpc fails a stream if the receiver falls behind.
+service ImageService {
+  rpc PullImage(PullImageRequest) returns (stream Image);
+}
+
+message Image {
+  bytes imageData = 1;
+}
+
+message PullImageRequest {
+  string image_id = 1;
+}

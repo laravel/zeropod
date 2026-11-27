@@ -92,7 +92,7 @@ CFLAGS := -O2 -g -Wall -Werror
 # dependencies installed.
 generate: export BPF_CLANG := $(CLANG)
 generate: export BPF_CFLAGS := $(CFLAGS)
-generate: ttrpc ebpf
+generate: ttrpc grpc ebpf
 	go generate ./api/...
 
 ebpf: ebpf-built-or-build-ebpf
@@ -106,7 +106,11 @@ ttrpc:
 	-I $(shell go env GOMODCACHE)/github.com/prometheus/client_model@v0.6.1
 	cd api/node/v1; protoc --go_out=. --go_opt=paths=source_relative \
 	--ttrpc_out=. --plugin=protoc-gen-ttrpc=`which protoc-gen-go-ttrpc` \
-	--ttrpc_opt=paths=source_relative *.proto -I.
+	--ttrpc_opt=paths=source_relative node.proto -I.
+
+grpc:
+	cd api/node/v1; protoc --go_out=. --go_opt=paths=source_relative \
+	--go-grpc_out=. --go-grpc_opt=paths=source_relative image.proto -I.
 
 # to improve reproducibility of the bpf builds, we dump the vmlinux.h and
 # store it compressed in git instead of dumping it during the build.

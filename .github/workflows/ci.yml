@@ -77,19 +77,20 @@ jobs:
 
       - name: Install protoc-gen-go
         run: |
-          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.10
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
           go install github.com/containerd/ttrpc/cmd/protoc-gen-go-ttrpc@v1.2.7
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
 
       - name: Install Protoc
         uses: arduino/setup-protoc@v3.0.0
         with:
-          version: "32.1"
+          version: "36.2"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: build ebpf image
         run: make build-ebpf
 
-      - name: generate ttrpc and ebpf
+      - name: generate protobuf and ebpf
         run: make generate
 
       - name: go fix

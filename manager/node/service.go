@@ -2,35 +2,27 @@
 package node
 
 import (
-	"archive/tar"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
-	"regexp"
 	"slices"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/checkpoint-restore/go-criu/v8/stats"
 	"github.com/containerd/containerd/v2/pkg/shim"
 	"github.com/containerd/ttrpc"
-	"github.com/klauspost/compress/zstd"
 	nodev1 "github.com/laravel/zeropod/api/node/v1"
 	v1 "github.com/laravel/zeropod/api/runtime/v1"
 	shimv1 "github.com/laravel/zeropod/api/shim/v1"
 	"github.com/laravel/zeropod/manager"
 	"github.com/laravel/zeropod/manager/capacity"
-	"github.com/mholt/archives"
-	"google.golang.org/protobuf/types/known/emptypb"
+	"github.com/laravel/zeropod/manager/image"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -64,8 +56,8 @@ func nodeSocketAddress() string {
 
 type Server struct {
 	unixListener *net.UnixListener
-	listener     net.Listener
 	ttrpc        *ttrpc.Server
+	image        *image.ImageService
 	kube         client.Client
 	log          *slog.Logger
 }
@@ -110,12 +102,18 @@ func DenyDeletionRestore(deny bool) ServerOption {
 }
 
 // NewServer starts a node server with two listeners:
-// * Unix socket for the shims to connect to it locally
-// * TCP+TLS socket to allow the other node instances to connect
+// * Unix socket serving ttrpc for the shims to connect to it locally
+// * TCP+TLS socket serving the gRPC image service to allow the other node
+// instances to pull images
 func NewServer(addr string, kube client.Client, log *slog.Logger, opts ...ServerOption) (*Server, error) {
 	host, ok := os.LookupEnv(nodev1.PodIPEnvKey)
 	if !ok {
 		return nil, fmt.Errorf("could not find host, env POD_IP is not set")
+	}
+
+	nodeName, ok := os.LookupEnv(nodev1.NodeNameEnvKey)
+	if !ok {
+		return nil, fmt.Errorf("could not find node name, env NODE_NAME is not set")
 	}
 
 	tlsConfig, err := initTLS(host)
@@ -123,19 +121,14 @@ func NewServer(addr string, kube client.Client, log *slog.Logger, opts ...Server
 		return nil, fmt.Errorf("initializing TLS certificates: %w", err)
 	}
 
-	listener, err := tls.Listen("tcp", addr, tlsConfig)
+	imageService, err := image.NewImageService(log, tlsConfig, nodeName, addr)
 	if err != nil {
-		return nil, fmt.Errorf("creating net listener: %w", err)
+		return nil, fmt.Errorf("creating image service: %w", err)
 	}
 
 	unixListener, err := setupUnixListener()
 	if err != nil {
 		return nil, fmt.Errorf("setting up unix listener: %w", err)
-	}
-
-	nodeName, ok := os.LookupEnv(nodev1.NodeNameEnvKey)
-	if !ok {
-		return nil, fmt.Errorf("could not find node name, env NODE_NAME is not set")
 	}
 
 	s, err := ttrpc.NewServer()
@@ -154,8 +147,9 @@ func NewServer(addr string, kube client.Client, log *slog.Logger, opts ...Server
 		log:                    log.With("node", nodeName),
 		host:                   host,
 		nodeName:               nodeName,
-		port:                   listener.Addr().(*net.TCPAddr).Port,
 		tlsConfig:              tlsConfig,
+		imageClient:            image.NewClient(tlsConfig),
+		imageServicePort:       imageService.Port(),
 		pageServerTLS:          true,
 		liveMigrationSupported: liveMigrationSupported,
 		timeouts:               DefaultTimeouts,
@@ -176,8 +170,8 @@ func NewServer(addr string, kube client.Client, log *slog.Logger, opts ...Server
 	)
 	return &Server{
 		ttrpc:        s,
+		image:        imageService,
 		unixListener: unixListener,
-		listener:     listener,
 		kube:         kube,
 		log:          log,
 	}, nil
@@ -217,7 +211,6 @@ func (s *Server) Start(ctx context.Context) {
 	defer func() {
 		_ = s.ttrpc.Close()
 		_ = s.unixListener.Close()
-		_ = s.listener.Close()
 		_ = os.Remove(nodeSocketAddress())
 	}()
 	go func() {
@@ -225,13 +218,9 @@ func (s *Server) Start(ctx context.Context) {
 			s.log.Error("serving ttrpc unix listener", "error", err)
 		}
 	}()
-	go func() {
-		if err := s.ttrpc.Serve(ctx, s.listener); err != nil {
-			s.log.Error("serving ttrpc listener", "error", err)
-		}
-	}()
+	go s.image.Start(ctx)
 
-	s.log.Info("starting node server", "unix", s.unixListener.Addr(), "socket", s.listener.Addr())
+	s.log.Info("starting node server", "unix", s.unixListener.Addr())
 
 	<-ctx.Done()
 	s.log.Info("stopping node server")
@@ -244,8 +233,9 @@ type nodeService struct {
 	log                    *slog.Logger
 	host                   string
 	nodeName               string
-	port                   int
 	tlsConfig              *tls.Config
+	imageClient            *image.Client
+	imageServicePort       int
 	pageServerTLS          bool
 	liveMigrationSupported bool
 	timeouts               Timeouts
@@ -536,17 +526,18 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 	log.Info("done waiting for migration servers", "container_name", req.PodInfo.ContainerName)
 
 	if !ns.local(container.ImageServer.Host) {
-		conn, err := tls.Dial("tcp", container.ImageServer.Address(), ns.tlsConfig)
-		if err != nil {
-			return nil, fmt.Errorf("dialing node service: %w", err)
-		}
-		nodeClient := nodev1.NewNodeClient(ttrpc.NewClient(conn))
 		log.Info("pulling image as it's not local",
 			"remote_host", container.ImageServer.Host, "remote_port", container.ImageServer.Port)
-		if err := ns.pullImage(ctx, nodeClient, container.ID); err != nil {
+		pullStats, err := ns.imageClient.Pull(ctx, container.ImageServer.Address(),
+			container.ID, nodev1.ImagePath(container.ID))
+		if err != nil {
 			log.Error("pulling image", "error", err)
 			return nil, err
 		}
+		log.Info("done pulling image",
+			"elapsed", pullStats.Duration.String(),
+			"transferred_bytes", pullStats.TransferredBytes,
+			"id", container.ID)
 	}
 
 	if err := os.Rename(nodev1.ImagePath(container.ID), nodev1.ImagePath(req.MigrationInfo.ImageId)); err != nil {
@@ -562,11 +553,10 @@ func (ns *nodeService) Restore(ctx context.Context, req *nodev1.RestoreRequest) 
 
 		log.Info("starting page server for migration", "name", migration.Name)
 
-		if _, err := ns.NewCriuLazyPages(ctx, &nodev1.CriuLazyPagesRequest{
+		if err := ns.newCriuLazyPages(ctx, criuLazyPages{
 			Address:        container.PageServer.Host,
 			Port:           int32(container.PageServer.Port),
 			CheckpointPath: nodev1.SnapshotPath(req.MigrationInfo.ImageId),
-			Tls:            ns.pageServerTLS,
 		}); err != nil {
 			return nil, fmt.Errorf("unable to start lazy pages daemon: %w", err)
 		}
@@ -710,114 +700,6 @@ func (ns *nodeService) findMatchingMigration(ctx context.Context, pod *corev1.Po
 	return migration, nil
 }
 
-func (ns *nodeService) pullImage(ctx context.Context, nodeClient nodev1.NodeClient, id string) error {
-	beforePull := time.Now()
-	cl, err := nodeClient.PullImage(ctx, &nodev1.PullImageRequest{ImageId: id})
-	if err != nil {
-		return err
-	}
-
-	var extractErr error
-	extractDone := make(chan struct{})
-	transferredBytes := 0
-	r, w := io.Pipe()
-	defer func() {
-		_ = w.Close()
-		<-extractDone
-	}()
-	go func() {
-		defer close(extractDone)
-		extractErr = extract(ctx, id, r)
-		// unblocks pending writes if extract stopped reading early
-		r.CloseWithError(extractErr)
-	}()
-	for {
-		img, err := cl.Recv()
-		if err != nil {
-			if err == io.EOF {
-				_ = w.Close()
-				break
-			}
-			return err
-		}
-		n, err := w.Write(img.ImageData)
-		if err != nil {
-			return fmt.Errorf("sending image data: %w", err)
-		}
-		transferredBytes += n
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-	<-extractDone
-	if extractErr != nil {
-		return extractErr
-	}
-
-	ns.log.Info("done pulling image",
-		"elapsed", time.Since(beforePull).String(),
-		"transferred_bytes", transferredBytes,
-		"id", id)
-	return nil
-}
-
-func extract(ctx context.Context, id string, reader io.ReadCloser) error {
-	format := archives.CompressedArchive{
-		Compression: archives.Zstd{},
-		Extraction:  archives.Tar{},
-	}
-
-	baseDir := nodev1.ImagePath(id)
-	if err := os.MkdirAll(baseDir, os.ModePerm); err != nil {
-		return err
-	}
-	return format.Extract(ctx, reader, func(ctx context.Context, f archives.FileInfo) error {
-		name := filepath.Join(baseDir, filepath.Clean(f.NameInArchive))
-		header, ok := f.Sys().(*tar.Header)
-		if f.IsDir() {
-			if err := os.MkdirAll(name, f.Mode()); err != nil {
-				return err
-			}
-			if err := os.Chmod(name, f.Mode()); err != nil {
-				return err
-			}
-			if !ok {
-				return nil
-			}
-			return os.Chown(name, int(header.Uid), int(header.Gid))
-		}
-
-		rc, err := f.Open()
-		if err != nil {
-			return err
-		}
-		//nolint:errcheck
-		defer rc.Close()
-
-		file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode())
-		if err != nil {
-			return err
-		}
-		//nolint:errcheck
-		defer file.Close()
-
-		if _, err := io.Copy(file, rc); err != nil {
-			return err
-		}
-
-		if err := os.Chmod(name, f.Mode()); err != nil {
-			return err
-		}
-
-		if !ok {
-			return nil
-		}
-		return os.Chown(name, int(header.Uid), int(header.Gid))
-	})
-}
-
 func (ns *nodeService) PrepareEvac(ctx context.Context, req *nodev1.EvacRequest) (*nodev1.EvacResponse, error) {
 	log := ns.log.With("pod_name", req.PodInfo.Name,
 		"namespace", req.PodInfo.Namespace,
@@ -922,7 +804,7 @@ func (ns *nodeService) Evac(ctx context.Context, req *nodev1.EvacRequest) (*node
 		if found := updateContainerSpec(migration, req.PodInfo.ContainerName, func(mc *v1.MigrationContainer) {
 			mc.ImageServer = &v1.MigrationServer{
 				Host: ns.host,
-				Port: ns.port,
+				Port: ns.imageServicePort,
 			}
 			mc.PageServer = pageServer
 			mc.Ports = req.PodInfo.Ports
@@ -971,137 +853,6 @@ func (ns *nodeService) AbortEvac(ctx context.Context, req *nodev1.EvacRequest) (
 		return &nodev1.EvacResponse{}, err
 	}
 	return &nodev1.EvacResponse{}, ns.setMigrationFailed(ctx, req.PodInfo.ContainerName, migration)
-}
-
-func (ns *nodeService) NewCriuLazyPages(ctx context.Context, r *nodev1.CriuLazyPagesRequest) (*emptypb.Empty, error) {
-	// the criu lazy-pages daemon would be able to connect directly to the page
-	// server via TLS but in testing this has been proven to work very
-	// unreliably. The root cause is unclear (gnutls?) but on arm64, TLS1.2
-	// worked fine while TLS1.3 simply broke sometimes. On amd64 both are just
-	// failing. The TLS handshake is successful but then CRIU fails with errors
-	// like: CRIU fails with: Error (criu/page-xfer.c:1635): page-xfer: BUG
-	//
-	// so instead, we now also spawn a proxy on the dst side, which takes care
-	// of TLS in Go and provides a plain local TCP socket for the lazy-pages
-	// daemon to connect to.
-	psp := newPageServerProxy(
-		"127.0.0.1:0",
-		net.JoinHostPort(r.Address, strconv.Itoa(int(r.Port))),
-		nil,
-		ns.tlsConfig,
-		ns.log,
-	)
-	pspContext, cancel := context.WithTimeout(context.Background(), ns.timeouts.PagesTransfer)
-	if err := psp.Start(pspContext); err != nil {
-		cancel()
-		ns.log.Error("starting page server dst proxy", "error", err)
-		return nil, fmt.Errorf("starting page server dst proxy: %w", err)
-	}
-	args := []string{
-		"-o", "/dev/stdout", "-v", "lazy-pages", "--images-dir",
-		r.CheckpointPath, "--work-dir", r.CheckpointPath, "--page-server",
-		"--address", "127.0.0.1", "--port", strconv.Itoa(psp.Port()),
-	}
-	cmd := exec.Command(CriuBin, args...)
-	ns.log.Info("starting lazy pages daemon", "cmd", cmd.Args)
-	execLogger := newExecLogger("criu-page-server", ns.log, slog.LevelDebug)
-	cmd.Stderr = execLogger
-	cmd.Stdout = execLogger
-	if err := cmd.Start(); err != nil {
-		cancel()
-		return &emptypb.Empty{}, fmt.Errorf("error running lazy-pages daemon: %s", err)
-	}
-	go func() {
-		if err := cmd.Wait(); err != nil {
-			ns.log.Error("lazy-pages wait", "error", err)
-		}
-		cancel()
-		if err := psp.Wait(); err != nil {
-			ns.log.Error("page server dst proxy", "error", err)
-		}
-		ns.log.Info("page server dst proxy closed")
-	}()
-	return &emptypb.Empty{}, nil
-}
-
-var imageIDRegexp = regexp.MustCompile("^[A-Fa-f0-9]{64}$")
-
-// PullImage allows the caller to pull a compressed image from the server
-func (ns *nodeService) PullImage(ctx context.Context, req *nodev1.PullImageRequest, imageStream nodev1.Node_PullImageServer) error {
-	log := ns.log.With("image_id", req.ImageId)
-	log.Info("got pull image request")
-	if !imageIDRegexp.MatchString(req.ImageId) {
-		log.Error("requested image_id is invalid")
-		return fmt.Errorf("invalid image_id requested: %s", req.ImageId)
-	}
-
-	files, err := filesToArchive(ctx, log, req)
-	if err != nil {
-		return fmt.Errorf("unable to archive checkpoint: %w", err)
-	}
-
-	format := archives.CompressedArchive{
-		Compression: archives.Zstd{
-			EncoderOptions: []zstd.EOption{zstd.WithEncoderLevel(zstd.SpeedFastest)},
-		},
-		Archival: archives.Tar{},
-	}
-	// split our image into 64KiB chunks
-	const chunkSize = 64 * 1024
-
-	errChan := make(chan error)
-	r, w := io.Pipe()
-	archive := func() {
-		defer close(errChan)
-		//nolint:errcheck
-		defer w.Close()
-		if err := format.Archive(ctx, w, files); err != nil {
-			log.Error("archiving checkpoint", "error", err)
-			errChan <- err
-		}
-	}
-	go archive()
-	for {
-		chunk := make([]byte, chunkSize)
-		n, err := r.Read(chunk)
-		if err != nil && err != io.EOF {
-			return err
-		}
-		if err == io.EOF {
-			break
-		}
-		if n == 0 {
-			continue
-		}
-		if err := imageStream.Send(&nodev1.Image{ImageData: chunk[:n]}); err != nil {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
-		}
-	}
-	for err := range errChan {
-		return err
-	}
-	return nil
-}
-
-func filesToArchive(ctx context.Context, log *slog.Logger, req *nodev1.PullImageRequest) ([]archives.FileInfo, error) {
-	allFiles, err := archives.FilesFromDisk(ctx, nil, map[string]string{nodev1.SnapshotPath(req.ImageId): ""})
-	if err != nil {
-		return nil, fmt.Errorf("unable to archive checkpoint: %w", err)
-	}
-	toArchive := []archives.FileInfo{}
-	for _, f := range allFiles {
-		if f.Mode().Type() == os.ModeSocket {
-			log.Debug("skipping unix socket", "name", f.NameInArchive)
-			continue
-		}
-		toArchive = append(toArchive, f)
-	}
-	return toArchive, nil
 }
 
 func (ns *nodeService) local(host string) bool {

@@ -13,8 +13,6 @@ service Node {
   rpc PrepareEvac(EvacRequest) returns (EvacResponse);
   rpc Restore(RestoreRequest) returns (RestoreResponse);
   rpc FinishRestore(RestoreRequest) returns (RestoreResponse);
-  rpc NewCriuLazyPages(CriuLazyPagesRequest) returns (google.protobuf.Empty);
-  rpc PullImage(PullImageRequest) returns (stream Image);
   rpc RestoreCapacity(RestoreCapacityRequest) returns (RestoreCapacityResponse);
 }
 
@@ -52,21 +50,6 @@ message MigrationInfo {
   google.protobuf.Timestamp restore_start = 5;
   google.protobuf.Timestamp restore_end = 6;
   repeated int32 ports = 7;
-}
-
-message Image {
-  bytes imageData = 1;
-}
-
-message CriuLazyPagesRequest {
-  string checkpoint_path = 1;
-  string address = 2;
-  int32 port = 3;
-  bool tls = 4;
-}
-
-message PullImageRequest {
-  string image_id = 1;
 }
 
 message RestoreCapacityRequest {

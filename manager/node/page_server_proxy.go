@@ -7,8 +7,67 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"os/exec"
+	"strconv"
 	"sync"
 )
+
+type criuLazyPages struct {
+	CheckpointPath string
+	Address        string
+	Port           int32
+}
+
+func (ns *nodeService) newCriuLazyPages(ctx context.Context, r criuLazyPages) error {
+	// the criu lazy-pages daemon would be able to connect directly to the page
+	// server via TLS but in testing this has been proven to work very
+	// unreliably. The root cause is unclear (gnutls?) but on arm64, TLS1.2
+	// worked fine while TLS1.3 simply broke sometimes. On amd64 both are just
+	// failing. The TLS handshake is successful but then CRIU fails with errors
+	// like: CRIU fails with: Error (criu/page-xfer.c:1635): page-xfer: BUG
+	//
+	// so instead, we now also spawn a proxy on the dst side, which takes care
+	// of TLS in Go and provides a plain local TCP socket for the lazy-pages
+	// daemon to connect to.
+	psp := newPageServerProxy(
+		"127.0.0.1:0",
+		net.JoinHostPort(r.Address, strconv.Itoa(int(r.Port))),
+		nil,
+		ns.tlsConfig,
+		ns.log,
+	)
+	pspContext, cancel := context.WithTimeout(context.Background(), ns.timeouts.PagesTransfer)
+	if err := psp.Start(pspContext); err != nil {
+		cancel()
+		ns.log.Error("starting page server dst proxy", "error", err)
+		return fmt.Errorf("starting page server dst proxy: %w", err)
+	}
+	args := []string{
+		"-o", "/dev/stdout", "-v", "lazy-pages", "--images-dir",
+		r.CheckpointPath, "--work-dir", r.CheckpointPath, "--page-server",
+		"--address", "127.0.0.1", "--port", strconv.Itoa(psp.Port()),
+	}
+	cmd := exec.Command(CriuBin, args...)
+	ns.log.Info("starting lazy pages daemon", "cmd", cmd.Args)
+	execLogger := newExecLogger("criu-page-server", ns.log, slog.LevelDebug)
+	cmd.Stderr = execLogger
+	cmd.Stdout = execLogger
+	if err := cmd.Start(); err != nil {
+		cancel()
+		return fmt.Errorf("error running lazy-pages daemon: %s", err)
+	}
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			ns.log.Error("lazy-pages wait", "error", err)
+		}
+		cancel()
+		if err := psp.Wait(); err != nil {
+			ns.log.Error("page server dst proxy", "error", err)
+		}
+		ns.log.Info("page server dst proxy closed")
+	}()
+	return nil
+}
 
 type pageServerProxy struct {
 	tlsListen, tlsBackend *tls.Config

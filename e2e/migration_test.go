@@ -180,7 +180,7 @@ func TestMigration(t *testing.T) {
 		}
 		assert.Eventually(t, func() bool {
 			pods := podsOfDeployment(t, e2e.client, tc.deploy)
-			if len(pods) != 1 {
+			if len(pods) != 1 || pods[0].UID == pod.UID {
 				return false
 			}
 			migration := &v1.Migration{}
