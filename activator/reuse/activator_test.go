@@ -334,6 +334,10 @@ func TestReuseActivatorMigrateProbe(t *testing.T) {
 	require.NoError(t, s.Reset())
 
 	require.NoError(t, cmd.Process.Signal(syscall.SIGSTOP))
+	var ws syscall.WaitStatus
+	_, err = syscall.Wait4(cmd.Process.Pid, &ws, syscall.WUNTRACED, nil)
+	require.NoError(t, err)
+	require.True(t, ws.Stopped())
 	conn, err := net.DialTimeout("tcp4", fmt.Sprintf("127.0.0.1:%d", port), time.Second)
 	require.NoError(t, err)
 	//nolint:errcheck
